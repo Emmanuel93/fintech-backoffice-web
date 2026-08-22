@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./libs/shared-types"
+    },
+    {
+      "path": "./libs/api-client"
+    },
+    {
+      "path": "./libs/auth"
+    },
+    {
+      "path": "./libs/design-system"
+    },
+    {
+      "path": "./libs/commercial"
+    }
+  ],
+  "compilerOptions": {}
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@org/source",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "types:gen": "node scripts/gen-types.mjs",
+    "env:up": "bash scripts/env-up.sh"
+  },
+  "private": true,
+  "devDependencies": {
+    "@babel/core": "^7.14.5",
+    "@babel/preset-react": "^7.14.5",
+    "@module-federation/vite": "^1.15.5",
+    "@nx/js": "23.1.0",
+    "@nx/react": "^23.1.0",
+    "@playwright/test": "^1.62.1",
+    "@swc-node/register": "1.11.1",
+    "@swc/core": "1.15.8",
+    "@swc/helpers": "0.5.18",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "nx": "23.1.0",
+    "openapi-typescript": "^7.13.0",
+    "prettier": "^3.8.1",
+    "tslib": "^2.3.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.13"
+  },
+  "workspaces": [
+    "packages/*",
+    "libs/*"
+  ],
+  "dependencies": {
+    "@module-federation/runtime": "^2.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.9.1"
+  }
+}

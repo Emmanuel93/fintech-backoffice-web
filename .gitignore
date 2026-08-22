@@ -1,0 +1,106 @@
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# compiled output
+dist
+tmp
+out-tsc
+
+# dependencies
+node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# misc
+/.sass-cache
+/connect.lock
+/coverage
+/libpeerconnection.log
+npm-debug.log
+yarn-error.log
+testem.log
+/typings
+
+# System Files
+.DS_Store
+Thumbs.db
+
+.nx/cache
+.nx/workspace-data
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md
+
+.nx/polygraph
+.nx/self-healing
+.nx/migrate-runs
+# local env overrides (no se comparten)
+.env.local
+
+# Evidencia de las pruebas end-to-end: vídeos, trazas y reportes. Se regenera en cada corrida
+# y pesa decenas de MB — se comparte el enlace al reporte, no los binarios.
+tools/e2e/.artifacts/
+playwright-report/
+tsconfig.tsbuildinfo
+
+# ── Caché de Nx ──────────────────────────────────────────────────────────────
+.nx/
+
+# Diagnósticos y tipos que genera el plugin de Module Federation en cada build. Estuvo rastreado
+# —`apps/mfe-salesorg/.mf/diagnostics/latest.json`— y aparecía modificado en cada `git status`
+# sin que nadie lo hubiera tocado, que es la forma más rápida de aprender a ignorar el status.
+.mf/
+
+# Salida de compilación de TypeScript por proyecto.
+*.tsbuildinfo
+
+# Capturas del recorrido de humo en navegador. Se regeneran en cada corrida y son evidencia, no
+# fuente: pesan y quedan viejas en cuanto cambia una pantalla.
+capturas/
+
+# ── Entrega de diseño (flujo-de-cr-dito-kredius) ─────────────────────────────
+# La exportación de la herramienta de diseño se comparte, pero no entera: lo que se consulta son
+# los `.dc.html` y la marca. Las capturas subidas pesan 12 MB, las regenera el diseñador y no
+# describen nada que los `.dc.html` no digan ya.
+flujo-de-cr-dito-kredius/project/uploads/
+flujo-de-cr-dito-kredius/project/.thumbnail
+flujo-de-cr-dito-kredius/project/_ds/
+
+# ── Configuración de asistentes de IA ────────────────────────────────────────
+# Las mismas siete «skills» de Nx duplicadas una vez por herramienta. Son 67 archivos y medio mega
+# de lo mismo seis veces, no compilan nada, y las regenera `nx configure-ai-agents` en la máquina de
+# quien las use. Es configuración de las herramientas de cada quien, no del proyecto.
+#
+# El workflow de CI de .github sí se queda: eso sí construye el proyecto. Y `AGENTS.md` también —
+# son las convenciones de Nx del repo, en el formato abierto que cualquier herramienta lee.
+.agents/
+.claude/
+.opencode/
+.cursor/
+.gemini/
+.codex/
+.github/skills/
+.github/agents/
+.github/prompts/
+opencode.json
+
+# ── Entrega de diseño ────────────────────────────────────────────────────────
+# Exportación de la herramienta de diseño: los `.dc.html`, la marca y una landing suelta. Es la
+# referencia contra la que se implementó la consola, pero no entra en ninguna compilación y son
+# 2 MB de los 4 que pesa el repo. Vive con el diseñador, que es quien la regenera.
+flujo-de-cr-dito-kredius/
+
+# Duplicado exacto de AGENTS.md para una herramienta concreta.
+CLAUDE.md
