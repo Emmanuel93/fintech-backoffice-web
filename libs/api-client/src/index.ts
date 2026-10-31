@@ -8,6 +8,8 @@ export * from './lib/salesorg.js';
 export * from './lib/audit.js';
 export * from './lib/collections.js';
 export * from './lib/accounting.js';
+export * from './lib/treasury.js';
 export * from './lib/staff.js';
 export * from './lib/beneficiaries.js';
+export * from './lib/compliance.js';
 export * from './lib/notifications.js';

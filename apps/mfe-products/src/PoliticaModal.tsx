@@ -67,6 +67,7 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
   onCreada: () => void;
 }) {
   const catalogo = useAsync(() => scoringApi.variables(), []);
+  const requisitos = useAsync(() => scoringApi.requisitosSinHistorial(), []);
 
   const [prospectType, setProspectType] = useState('INDIVIDUAL');
   const [productTypeIntent, setProductTypeIntent] = useState(tipoProductoInicial ?? 'PERSONAL_LOAN');
@@ -76,6 +77,9 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
   // La matriz arranca con los tres niveles porque los tres son obligatorios: una política que
   // sólo define BAJO deja sin destino a todo lo que no alcance ese score.
   const [umbrales, setUmbrales] = useState({ bajo: '200', medio: '100' });
+  // Quien no tiene historial en buró: score 0 por defecto, que con estas bandas es rechazo.
+  const [scoreSinHistorial, setScoreSinHistorial] = useState('0');
+  const [pideSinHistorial, setPideSinHistorial] = useState<string[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,8 +122,17 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
     // Un corte de riesgo bajo por debajo del medio invierte la escala en silencio: todo caería en
     // BAJO y la revisión manual dejaría de ocurrir sin que nada falle.
     else if (bajo <= medio) f.push('que el corte de riesgo BAJO sea mayor que el de MEDIO');
+    // Lo mismo que valida el motor al publicar, dicho antes de intentarlo.
+    const banda = bandaSinHistorial(scoreSinHistorial, umbrales);
+    if (banda === null) f.push('el score sin historial');
+    else if (banda === 'BAJO') f.push('que el score sin historial no caiga en BAJO: sin historial no se aprueba en automático');
+    else if (banda === 'ALTO' && pideSinHistorial.length > 0) {
+      f.push('subir el score sin historial a MEDIO o quitar los datos adicionales: en rechazo nadie los revisa');
+    }
     return f;
-  }, [name, reglas, umbrales]);
+  }, [name, reglas, umbrales, scoreSinHistorial, pideSinHistorial]);
+
+  const bandaSH = bandaSinHistorial(scoreSinHistorial, umbrales);
 
   const guardar = async () => {
     setGuardando(true); setError(null);
@@ -152,6 +165,7 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
           // a los otros dos, no una banda con su propio corte.
           { riskLevel: 'ALTO', minScore: -9999, decision: 'REJECTED' },
         ],
+        noHistory: { score: Number(scoreSinHistorial), requirements: pideSinHistorial },
       };
       await scoringApi.crearPolitica(body);
       onCreada();
@@ -314,6 +328,48 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
             </p>
           </section>
 
+          <section>
+            <div className="bo-grupo-cap">Sin historial en buró · qué se hace con quien no tiene</div>
+            <p className="bo-page-sub" style={{ margin: '0 0 8px' }}>
+              Sin historial no hay reglas que evaluar. Se le asigna este score y pasa por la misma
+              matriz de arriba. Si cae en revisión, se le pueden pedir datos adicionales —por ejemplo,
+              constancia de estudios en un producto para estudiantes—.
+            </p>
+            <div className="bo-defs cols-3">
+              <Field label="Score sin historial">
+                <NumberInput value={scoreSinHistorial} onChange={setScoreSinHistorial} />
+              </Field>
+              <div>
+                <div className="bo-def-k">Cae en</div>
+                <div className="bo-def-v">
+                  {bandaSH === null ? '—'
+                    : bandaSH === 'BAJO' ? <Badge tone="bad">BAJO · no permitido sin historial</Badge>
+                    : bandaSH === 'MEDIO' ? <Badge tone="warn">MEDIO · a revisión manual</Badge>
+                    : <Badge tone="muted">ALTO · rechazo</Badge>}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <div className="bo-def-k" style={{ marginBottom: 4 }}>Datos adicionales que se piden</div>
+              <Block state={requisitos} emptyLabel="El motor no publicó qué se puede pedir.">
+                {(lista) => (
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    {lista.map((r) => (
+                      <Checkbox
+                        key={r.code}
+                        checked={pideSinHistorial.includes(r.code)}
+                        onChange={(on) => setPideSinHistorial((xs) =>
+                          on ? [...xs, r.code] : xs.filter((x) => x !== r.code))}
+                        label={<span className="bo-page-sub">{r.label}</span>}
+                        title={bandaSH === 'MEDIO' ? undefined : 'Sólo se piden cuando la solicitud va a revisión'}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Block>
+            </div>
+          </section>
+
           {faltan.length > 0 && (
             <div className="bo-alert">
               Falta {faltan.join(', ')}.
@@ -324,6 +380,18 @@ export function PoliticaModal({ tipoProductoInicial, onClose, onCreada }: {
       )}
     </Modal>
   );
+}
+
+/**
+ * En qué banda cae el score sin historial, con los cortes que se están editando. Misma regla que el
+ * motor: la de mayor corte que se alcanza; ALTO es todo lo demás.
+ */
+function bandaSinHistorial(score: string, umbrales: { bajo: string; medio: string }): 'BAJO' | 'MEDIO' | 'ALTO' | null {
+  const s = Number(score);
+  if (score.trim() === '' || Number.isNaN(s)) return null;
+  if (s >= Number(umbrales.bajo)) return 'BAJO';
+  if (s >= Number(umbrales.medio)) return 'MEDIO';
+  return 'ALTO';
 }
 
 /** La regla dicha en una línea, para que quede legible en la ficha del producto. */

@@ -183,6 +183,11 @@ const FIRMA: Partial<Record<Capability, string>> = {
   'products.manage': 'Tasas y políticas',
   'permissions.manage': 'Configuración',
   'salesorg.manage': 'Estructura comercial',
+  // Dictaminar una identidad habilita un desembolso o un depósito, y resolver una homonimia puede
+  // bloquear a una persona: las dos son firmas aunque no muevan un peso por sí mismas.
+  'compliance.review-identity': 'Identidad de personas',
+  'compliance.adjudicate': 'Coincidencias en listas',
+  'beneficiaries.review-identity': 'Identidad de beneficiarias',
 };
 
 /**
@@ -586,6 +591,9 @@ function moduloLabel(m: string): string {
     // Faltaba, y el efecto no era sólo estético: el grupo salía titulado «permissions» en
     // minúscula entre encabezados en español, así que parecía un error de datos y no un módulo.
     permissions: 'Roles y permisos',
+    // Sin estas, los grupos del rol salían titulados con el prefijo técnico entre encabezados en
+    // español, que se lee como un error de datos y no como un módulo.
+    compliance: 'Cumplimiento', beneficiaries: 'Beneficiarios', treasury: 'Bancos y tesorería',
   };
   return map[m] ?? m;
 }
@@ -614,6 +622,15 @@ function capLabel(c: string): string {
     // el mismo texto repetido, que se lee como un fallo de la pantalla.
     'permissions.view': 'Ver roles y permisos',
     'permissions.manage': 'Editar roles y permisos',
+    // Las de cumplimiento y beneficiarios llegaron después y se quedaron sin nombre: la matriz las
+    // mostraba con el código como título y otra vez debajo, justo en las filas que dicen quién
+    // firma una identidad.
+    'compliance.view': 'Ver la mesa de cumplimiento',
+    'compliance.review-identity': 'Dictaminar identidad (KYC)',
+    'compliance.adjudicate': 'Resolver coincidencias en listas',
+    'beneficiaries.view': 'Ver colocaciones a beneficiarios',
+    'beneficiaries.review-identity': 'Dictaminar identidad de beneficiarias',
+    'treasury.view': 'Ver bancos y tesorería',
   };
   return map[c] ?? c;
 }

@@ -383,6 +383,23 @@ export interface PoliticaScoring {
   activa: boolean;
   reglas: ReglaScoring[];
   umbrales: UmbralScoring[];
+  /** Qué hace la política con quien no tiene historial en buró. */
+  sinHistorial?: SinHistorialScoring;
+}
+
+/**
+ * Quien no tiene historial en buró (NO_HIT / NOT_FOUND) recibe este score, que pasa por las mismas
+ * bandas que cualquier otro; si cae en revisión, se le piden además estos datos.
+ */
+export interface SinHistorialScoring {
+  score: number;
+  requisitos: Array<{ codigo: string; etiqueta: string }>;
+}
+
+/** Un dato que una política puede pedir a quien no tiene historial. Catálogo del motor. */
+export interface RequisitoSinHistorial {
+  code: string;
+  label: string;
 }
 
 /**
@@ -437,12 +454,20 @@ export interface NuevaPolitica {
     description?: string;
   }>;
   thresholds: Array<{ riskLevel: string; minScore: number; decision: string }>;
+  /** Sin historial en buró: score asignado y códigos de lo que se pide. */
+  noHistory?: { score: number; requirements: string[] };
 }
 
 export const scoringApi = {
   /** Qué se puede configurar. Lo dice el motor, no la pantalla. */
   async variables(): Promise<VariableScoring[]> {
     if (!isMock()) return request<VariableScoring[]>('/scoring/rule-types');
+    return wait([]);
+  },
+
+  /** Qué se le puede pedir a quien no tiene historial. Lo dice el motor, no la pantalla. */
+  async requisitosSinHistorial(): Promise<RequisitoSinHistorial[]> {
+    if (!isMock()) return request<RequisitoSinHistorial[]>('/scoring/no-history-requirements');
     return wait([]);
   },
 

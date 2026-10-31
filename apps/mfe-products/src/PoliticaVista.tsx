@@ -44,10 +44,30 @@ export function Politica({ tipoProspecto, politica }: { tipoProspecto: string; p
         ))}
       </div>
 
+      <SinHistorial politica={politica} />
+
       <GrupoReglas titulo="Descalifican de entrada" reglas={descalifican} tono="bad"
                    nota="Se cumple una y la solicitud va a rechazo sin evaluar el resto." />
       <GrupoReglas titulo="Suman puntos" reglas={suman} tono="ok" />
       <GrupoReglas titulo="Restan puntos" reglas={restan} tono="warn" />
+    </div>
+  );
+}
+
+/**
+ * Qué pasa con quien no tiene historial en buró. Va junto a la matriz porque es la matriz la que
+ * decide: el score sin historial cae en una de sus bandas como cualquier otro.
+ */
+function SinHistorial({ politica }: { politica: PoliticaScoring }) {
+  const sh = politica.sinHistorial ?? { score: 0, requisitos: [] };
+  const banda = [...politica.umbrales]
+    .sort((a, b) => b.scoreMinimo - a.scoreMinimo)
+    .find((u) => sh.score >= u.scoreMinimo) ?? politica.umbrales[politica.umbrales.length - 1];
+  return (
+    <div className="bo-page-sub" style={{ marginTop: 10 }}>
+      <b>Sin historial en buró:</b> score {sh.score}
+      {banda && <> → {banda.nivelRiesgo}, {decisionLabel(banda.decision)}</>}
+      {sh.requisitos.length > 0 && <> · se pide: {sh.requisitos.map((r) => r.etiqueta).join(', ')}</>}
     </div>
   );
 }

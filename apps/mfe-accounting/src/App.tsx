@@ -20,11 +20,12 @@ import { Reconciliacion } from './Reconciliacion';
 import { PolizaModal } from './PolizaModal';
 import { FacturaModal } from './FacturaModal';
 import { PrestamoModal } from './PrestamoModal';
+import { Tesoreria } from './Tesoreria';
 
 ensureThemeStyles();
 
-type Vista = 'resumen' | 'polizas' | 'facturas' | 'balanza';
-const VISTAS: readonly Vista[] = ['resumen', 'polizas', 'facturas', 'balanza'];
+type Vista = 'resumen' | 'polizas' | 'facturas' | 'balanza' | 'tesoreria';
+const VISTAS: readonly Vista[] = ['resumen', 'polizas', 'facturas', 'balanza', 'tesoreria'];
 
 /** Lo que el usuario tiene abierto encima de la tabla. Uno a la vez, y se apilan al navegar. */
 type Detalle =
@@ -62,8 +63,15 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
   // está auditando—. Se comprueba aquí sólo para no ofrecer un botón que va a contestar 403.
   const { can } = useCapabilities();
   const puedeCerrar = can('accounting.close');
+  const puedeVerMayor = can('accounting.view');
 
-  const periodos = useAsync(() => accountingApi.periods(), []);
+  // Tesorería se abre con `treasury.view`, que operación tiene sin tener el mayor. Pedirle los
+  // períodos a quien no puede leerlos sería un 403 seguro, y cada 403 queda en la bitácora como un
+  // intento denegado que nadie hizo a propósito.
+  const periodos = useAsync(
+    () => (puedeVerMayor ? accountingApi.periods() : Promise.resolve([] as AccountingPeriod[])),
+    [puedeVerMayor],
+  );
 
   // El período abierto es el que se está trabajando; es el que hay que ver al entrar. Arrancar en
   // el más reciente cerrado mostraría un mes que ya nadie toca.
@@ -105,6 +113,13 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
   }, [periodos]);
 
   const cerrado = actual?.status === 'CLOSED';
+
+  // Tesorería es otra pantalla, con su propio encabezado y sin el selector de período: el dinero
+  // que sale no espera al cierre. Se resuelve aquí, después de todos los hooks, para que el módulo
+  // siga vivo —y con su período— al ir y volver entre tesorería y pólizas.
+  if (vista === 'tesoreria') {
+    return <Tesoreria periodo={periodos.data?.find((p) => p.status === 'OPEN')?.period} />;
+  }
 
   return (
     <div>

@@ -57,52 +57,86 @@ export function Expediente({ applicationId, dictamen, onDictaminar }: {
   onDictaminar?: (tipo: string, v: Veredicto | undefined) => void;
 }) {
   const state = useAsync(() => applicationsApi.expediente(applicationId), [applicationId]);
-  const [abierto, setAbierto] = useState<string | null>(null);
 
   return (
     <Block state={state} emptyLabel="El solicitante no ha subido documentos." isEmpty={(d) => d.length === 0}>
-      {(docs) => {
-        const revisados = docs.filter((d) => dictamen?.[d.documentType]).length;
-        const rechazados = docs.filter((d) => { const v = dictamen?.[d.documentType]; return v && !v.ok; }).length;
-        return (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {onDictaminar && (
-              <div className="bo-scope" style={{ marginBottom: 2 }}>
-                <Chip tone={rechazados > 0 ? 'bad' : revisados === docs.length ? 'ok' : undefined}>
-                  {revisados} de {docs.length} revisados
-                </Chip>
-                <span className="bo-page-sub" style={{ display: 'inline' }}>
-                  {/* Se dice qué es este dictamen, porque parece estado guardado y no lo es. El
-                      backend no tiene hoy dónde persistir un veredicto por documento: lo que queda
-                      registrado es la decisión de la solicitud o la petición de documentos, y este
-                      panel es lo que las redacta. */}
-                  El dictamen por documento es tu hoja de trabajo: <b>no se guarda por archivo</b>.
-                  Lo que queda en el expediente es la decisión o la petición de documentos que
-                  compone.
-                </span>
-              </div>
-            )}
-            {docs.map((doc) => (
-              <DocumentoRow
-                key={doc.fileId}
-                applicationId={applicationId}
-                doc={doc}
-                abierto={abierto === doc.documentType}
-                onToggle={() => setAbierto((a) => (a === doc.documentType ? null : doc.documentType))}
-                veredicto={dictamen?.[doc.documentType]}
-                onDictaminar={onDictaminar}
-              />
-            ))}
-          </div>
-        );
-      }}
+      {(docs) => (
+        <VisorDocumentos
+          docs={docs.map((d: ExpedienteFile) => ({ ...d, key: d.fileId }))}
+          abrir={(tipo) => applicationsApi.documentUrl(applicationId, tipo)}
+          dictamen={dictamen}
+          onDictaminar={onDictaminar}
+        />
+      )}
     </Block>
   );
 }
 
-function DocumentoRow({ applicationId, doc, abierto, onToggle, veredicto, onDictaminar }: {
-  applicationId: string;
-  doc: ExpedienteFile;
+/** Lo mínimo que el visor necesita saber de un archivo para listarlo, sin su contenido. */
+export interface DocumentoVisible {
+  /** Identidad estable de la fila. Donde el dominio no da `fileId`, basta el tipo. */
+  key: string;
+  documentType: string;
+  fileName?: string | null;
+  contentType: string;
+  sizeBytes: number;
+}
+
+/**
+ * El visor, sin saber de dónde salen los archivos.
+ *
+ * Nació atado a solicitudes y se separó cuando cumplimiento y beneficiarios necesitaron lo mismo:
+ * una INE y una selfie que comparar contra lo capturado. Quien lo usa le pasa la lista y cómo
+ * bajar cada archivo (`abrir`); el resto —bajar al abrir, zoom, revocar el blob al cerrar— es
+ * igual en las tres mesas, y tenerlo tres veces era tener tres formas de olvidar revocarlo.
+ */
+export function VisorDocumentos({ docs, abrir, dictamen, onDictaminar }: {
+  docs: DocumentoVisible[];
+  /** Devuelve una URL `blob:` lista para `<img>` o `<iframe>`. El visor la revoca al desmontar. */
+  abrir: (documentType: string) => Promise<string>;
+  dictamen?: Dictamen;
+  onDictaminar?: (tipo: string, v: Veredicto | undefined) => void;
+}) {
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const revisados = docs.filter((d) => dictamen?.[d.documentType]).length;
+  const rechazados = docs.filter((d) => { const v = dictamen?.[d.documentType]; return v && !v.ok; }).length;
+
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      {onDictaminar && (
+        <div className="bo-scope" style={{ marginBottom: 2 }}>
+          <Chip tone={rechazados > 0 ? 'bad' : revisados === docs.length ? 'ok' : undefined}>
+            {revisados} de {docs.length} revisados
+          </Chip>
+          <span className="bo-page-sub" style={{ display: 'inline' }}>
+            {/* Se dice qué es este dictamen, porque parece estado guardado y no lo es. El
+                backend no tiene hoy dónde persistir un veredicto por documento: lo que queda
+                registrado es la decisión de la solicitud o la petición de documentos, y este
+                panel es lo que las redacta. */}
+            El dictamen por documento es tu hoja de trabajo: <b>no se guarda por archivo</b>.
+            Lo que queda en el expediente es la decisión o la petición de documentos que
+            compone.
+          </span>
+        </div>
+      )}
+      {docs.map((doc) => (
+        <DocumentoRow
+          key={doc.key}
+          doc={doc}
+          abrir={abrir}
+          abierto={abierto === doc.documentType}
+          onToggle={() => setAbierto((a) => (a === doc.documentType ? null : doc.documentType))}
+          veredicto={dictamen?.[doc.documentType]}
+          onDictaminar={onDictaminar}
+        />
+      ))}
+    </div>
+  );
+}
+
+function DocumentoRow({ doc, abrir, abierto, onToggle, veredicto, onDictaminar }: {
+  doc: DocumentoVisible;
+  abrir: (documentType: string) => Promise<string>;
   abierto: boolean;
   onToggle: () => void;
   veredicto?: Veredicto;
@@ -112,13 +146,17 @@ function DocumentoRow({ applicationId, doc, abierto, onToggle, veredicto, onDict
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const urlRef = useRef<string | null>(null);
+  // El cargador llega como prop y quien lo pasa suele crearlo en cada render. Leerlo de una ref
+  // evita que un re-render a media descarga cancele la petición y la vuelva a lanzar.
+  const abrirRef = useRef(abrir);
+  abrirRef.current = abrir;
 
   // El archivo se baja al abrirlo, no al listar: un expediente son cuatro
   // imágenes y una ficha se abre para leer el score, no siempre para verlas.
   useEffect(() => {
     if (!abierto || urlRef.current) return;
     let vivo = true;
-    applicationsApi.documentUrl(applicationId, doc.documentType)
+    abrirRef.current(doc.documentType)
       .then((u) => {
         if (!vivo) { URL.revokeObjectURL(u); return; }
         urlRef.current = u;
@@ -126,7 +164,7 @@ function DocumentoRow({ applicationId, doc, abierto, onToggle, veredicto, onDict
       })
       .catch((e) => vivo && setError(e instanceof Error ? e.message : 'No se pudo abrir'));
     return () => { vivo = false; };
-  }, [abierto, applicationId, doc.documentType]);
+  }, [abierto, doc.documentType]);
 
   // Cada blob abierto retiene memoria hasta que se revoca. Se hace al desmontar
   // —cerrar la ficha— y no al colapsar, para no volver a bajarlo si se reabre.
@@ -142,7 +180,7 @@ function DocumentoRow({ applicationId, doc, abierto, onToggle, veredicto, onDict
         <span className="bo-doc-caret">{abierto ? '▾' : '▸'}</span>
         <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
           <b style={{ fontSize: 13 }}>{docLabel(doc.documentType)}</b>
-          <span className="bo-tree-code"> {doc.fileName} · {kb(doc.sizeBytes)}</span>
+          <span className="bo-tree-code"> {doc.fileName ?? doc.documentType} · {kb(doc.sizeBytes)}</span>
         </span>
         {veredicto && (
           <Badge tone={veredicto.ok ? 'ok' : 'bad'}>

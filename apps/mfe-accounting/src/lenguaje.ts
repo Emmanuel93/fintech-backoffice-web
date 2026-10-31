@@ -188,3 +188,80 @@ export function sucursalLabel(nombre: string | null | undefined): string {
 export function responsableLabel(nombre: string | null | undefined): string {
   return nombre ?? 'Sin responsable';
 }
+
+/* ── Tesorería ──────────────────────────────────────────────────────────── */
+
+/**
+ * El estado de un SPEI dicho como lo que pasó con el dinero.
+ *
+ * «Aceptada» y «Liquidada» van separadas a propósito y con tonos distintos: STP acepta la orden en
+ * segundos, pero que el banco receptor abone es otro hecho. Quien contesta «¿ya le llegó?» leyendo
+ * «Aceptada» como «depositada» se equivoca justo en el caso que motivó la llamada.
+ */
+export const ESTADO_DISPERSION: Record<string, { texto: string; tono: Tone }> = {
+  REQUESTED:  { texto: 'Solicitada', tono: 'muted' },
+  DISPATCHED: { texto: 'Enviada',    tono: 'info' },
+  ACCEPTED:   { texto: 'Aceptada',   tono: 'warn' },
+  SETTLED:    { texto: 'Liquidada',  tono: 'ok' },
+  REJECTED:   { texto: 'Rechazada',  tono: 'bad' },
+  RETURNED:   { texto: 'Devuelta',   tono: 'bad' },
+  FAILED:     { texto: 'Falló',      tono: 'bad' },
+  CANCELLED:  { texto: 'Cancelada',  tono: 'muted' },
+};
+
+/** Un estado que nadie tradujo se enseña tal cual: tiene que notarse, no pasar por otro. */
+export function estadoDispersion(s: string | null | undefined): { texto: string; tono: Tone } {
+  return ESTADO_DISPERSION[s ?? ''] ?? { texto: s ?? '—', tono: 'muted' };
+}
+
+/** Los estados donde el dinero ya no va a moverse más. Lo demás está en vuelo. */
+export const DISPERSION_TERMINAL = new Set(['SETTLED', 'REJECTED', 'RETURNED', 'FAILED', 'CANCELLED']);
+
+/** Los que terminaron mal: en el recorrido se pintan como falla, no como un paso más. */
+export const DISPERSION_FALLIDA = new Set(['REJECTED', 'RETURNED', 'FAILED']);
+
+export const ESTADO_CUENTA_BANCARIA: Record<string, { texto: string; tono: Tone }> = {
+  ACTIVE:    { texto: 'Activa',     tono: 'ok' },
+  SUSPENDED: { texto: 'Suspendida', tono: 'warn' },
+  CLOSED:    { texto: 'Cerrada',    tono: 'muted' },
+};
+
+export const VIA_PAGO: Record<string, string> = {
+  SPEI: 'SPEI',
+  CODI: 'CoDi',
+  INTERNAL: 'Interna',
+};
+
+/**
+ * Los eslabones de la traza del dinero, en el orden en que se enhebran.
+ *
+ * Se reconocen por patrón y no por igualdad porque el código lo pone quien proyecta la traza; lo
+ * que no se reconoce se enseña humanizado, que es mejor que esconder un eslabón.
+ */
+const ESLABONES: Array<[RegExp, string]> = [
+  [/REQUEST|ORIGIN|SOURCE|PAYOUT/i, 'Origen: la disposición pide el pago'],
+  [/ROUT|BANK_ACCOUNT/i, 'Cuenta ordenante elegida'],
+  [/DISPATCH|TRACKING|SENT/i, 'Salió al banco con clave de rastreo'],
+  [/SETTL|CEP/i, 'El banco receptor abonó la cuenta'],
+  [/RECONCIL|STATEMENT|LINE/i, 'El banco lo reporta en su estado de cuenta'],
+  [/POST|VOUCHER|JOURNAL|LEDGER/i, 'Asentado en contabilidad'],
+];
+
+export function eslabonLabel(step: string): string {
+  const hit = ESLABONES.find(([re]) => re.test(step));
+  if (hit) return hit[1];
+  const t = step.replace(/_/g, ' ').toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** Lo que falta, dicho como a quién hay que preguntarle. */
+const FALTA: Record<string, string> = {
+  SIN_RUTEAR: 'no tiene cuenta ordenante asignada',
+  SIN_DESPACHAR: 'no ha salido al banco: todavía no tiene clave de rastreo',
+  SIN_CONCILIAR: 'el banco todavía no lo reporta en el estado de cuenta',
+  SIN_ASENTAR: 'falta su póliza en contabilidad',
+};
+
+export function faltaLabel(missingLink: string): string {
+  return FALTA[missingLink] ?? missingLink.replace(/_/g, ' ').toLowerCase();
+}

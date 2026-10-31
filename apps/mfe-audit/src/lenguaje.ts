@@ -143,7 +143,7 @@ export function moduloLabel(e: AuditEntry): string {
  */
 export function frase(e: AuditEntry): string {
   const quien = e.actorName ?? e.actorEmail ?? (e.actor ? 'un usuario identificado' : 'El sistema');
-  const verbo = ACCION[(e.action ?? '').toUpperCase()] ?? verboDesdeEvento(e.eventType);
+  const verbo = verboDesdeRuta(e) ?? ACCION[(e.action ?? '').toUpperCase()] ?? verboDesdeEvento(e.eventType);
   const donde = moduloLabel(e);
   const fallo = e.outcome && e.outcome.toUpperCase() !== 'SUCCESS';
 
@@ -154,6 +154,35 @@ export function frase(e: AuditEntry): string {
   if (e.subjectName) f += `, sobre ${e.subjectName}`;
   if (fallo) f += ` — sin éxito${e.statusCode ? ` (${e.statusCode})` : ''}`;
   return f;
+}
+
+/**
+ * Las escrituras que importan en una revisión, reconocidas por su ruta.
+ *
+ * <p>La bitácora registra toda escritura como `MUTATION`, sin decir cuál. Así, la firma de un
+ * dictamen de identidad se leía «Olivia Paz generó un evento en Beneficiaries» —la misma frase que
+ * un cierre de sesión—, y encontrar quién habilitó un depósito obligaba a abrir renglón por renglón
+ * para leer el endpoint. La ruta ya lo dice; aquí se traduce.
+ *
+ * <p>Sólo se nombran las que alguien busca al auditar un crédito. Una ruta que no está aquí cae al
+ * verbo genérico, que no miente: dice que hubo un cambio sin afirmar cuál.
+ */
+const RUTAS: Array<[RegExp, string]> = [
+  [/\/beneficiaries\/placements\/[^/]+\/identity-review$/, 'firmó el dictamen de identidad de una beneficiaria'],
+  [/\/compliance\/verifications\/[^/]+\/identity$/, 'firmó el dictamen de identidad'],
+  [/\/compliance\/verifications\/[^/]+\/adjudicate$/, 'resolvió una coincidencia en listas'],
+  [/\/origination\/applications\/[^/]+\/decision$/, 'resolvió la solicitud de crédito'],
+  [/\/origination\/applications\/[^/]+\/request-documents$/, 'pidió documentos'],
+  [/\/placements\/[^/]+\/approve$/, 'aprobó la colocación y asumió el riesgo'],
+  [/\/clients\/[^/]+\/assign-executive$/, 'reasignó el ejecutivo de un cliente'],
+  [/\/accounting\/periods\/[^/]+\/close$/, 'cerró el período contable'],
+  [/\/auth\/(staff\/)?login$/, 'inició sesión'],
+  [/\/auth\/(staff\/)?logout$/, 'cerró sesión'],
+];
+
+function verboDesdeRuta(e: AuditEntry): string | null {
+  if (!e.httpPath || (e.httpMethod ?? 'GET').toUpperCase() === 'GET') return null;
+  return RUTAS.find(([re]) => re.test(e.httpPath!))?.[1] ?? null;
 }
 
 /**
@@ -224,6 +253,7 @@ export function eventoLabel(t: string): string {
     ACCESS_LIST: 'Listado consultado',
     ACCESS_DOWNLOAD: 'Descarga de documento',
     ACCESS_SEARCH: 'Búsqueda',
+    ACCESS_MUTATION: 'Operación que modifica',
   };
   if (map[t]) return map[t];
   const partes = t.split('_');

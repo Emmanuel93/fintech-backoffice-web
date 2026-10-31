@@ -74,6 +74,9 @@ export const NAV_SECTIONS: NavSection[] = [
       // financiera es su identidad. Misma sección, dos alcances distintos.
       { to: '/solicitudes', label: 'Solicitudes de crédito', alias: 'mfe-applications', vista: 'bandeja', capability: 'applications.view' },
       { to: '/beneficiarios', label: 'Beneficiarios · KYC', alias: 'mfe-applications', vista: 'beneficiarios', capability: 'beneficiaries.view' },
+      // La compuerta común a los dos: identidad y listas por persona. Va en Originación porque es
+      // donde detiene algo —sin ella no se dispone ni se coloca—, no en Administración.
+      { to: '/cumplimiento', label: 'Cumplimiento · identidad y listas', alias: 'mfe-applications', vista: 'cumplimiento', capability: 'compliance.view' },
     ],
   },
   {
@@ -127,6 +130,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/contabilidad/polizas', label: 'Pólizas', alias: 'mfe-accounting', vista: 'polizas', capability: 'accounting.view' },
       { to: '/contabilidad/facturas', label: 'Facturas', alias: 'mfe-accounting', vista: 'facturas', capability: 'accounting.view' },
       { to: '/contabilidad/balanza', label: 'Balanza', alias: 'mfe-accounting', vista: 'balanza', capability: 'accounting.view' },
+      // Va en Contabilidad porque se concilia contra ella —la póliza de egreso contra el SPEI que
+      // de verdad salió—, pero con su propia capacidad: operación contesta «¿ya le llegó?» con la
+      // clave de rastreo, y para eso no necesita leer el mayor.
+      { to: '/contabilidad/tesoreria', label: 'Bancos y tesorería', alias: 'mfe-accounting', vista: 'tesoreria', capability: 'treasury.view' },
     ],
   },
   {

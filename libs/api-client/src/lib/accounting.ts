@@ -773,6 +773,12 @@ const VOUCHER_SPECS: VoucherSpec[] = [
   { type: 'INGRESO', period: '202608', date: '2026-08-11T18:05:00Z', loan: 'ca-0244',
     concept: 'Pago recibido — aplica a interés devengado y capital', trigger: 'PAYMENT_APPLIED',
     lines: [['1101', 12000, 0], ['1203', 0, 7000], ['1201', 0, 5000]] },
+  // Una colocación con la línea de distribuidor: el crédito le llega a una tercera y la deuda se
+  // queda con el distribuidor. Contablemente es la misma póliza que cualquier disposición —cargo a
+  // cartera, abono a bancos—; a quién le llegó el SPEI lo cuenta tesorería, que lo deriva de aquí.
+  { type: 'EGRESO', period: '202608', date: '2026-08-13T16:20:00Z', loan: 'ca-0244',
+    concept: 'Crédito a tercero — SPEI a Rosa Elena Ibarra Salgado', trigger: 'DISPOSITION_THIRD_PARTY_CREDIT',
+    lines: [['1201', 45000, 0], ['1101', 0, 45000]] },
 
   // Sucursal Monterrey Centro — el crédito en mora: ordinario, moratorio y deterioro.
   { type: 'DIARIO', period: '202608', date: '2026-08-12T06:00:00Z', loan: 'ca-0091',

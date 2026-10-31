@@ -59,6 +59,14 @@ liquidarse tomaría meses reales.
 cartera, su calendario, sus pagos y el tablero movido), `theme.spec.ts` (claro/oscuro, que
 persista y que el contraste aguante en ambos).
 
+**`browser/regresion-*.spec.ts`** — los actos del video que arma el orquestador de
+`fintech-services/tools/regresion-e2e`. Cada uno marca sus momentos con `historia(clave)` y señala
+el dato con `senala()`. Los de la **demo completa** —`colocaciones`, `region`, `contabilidad`,
+`tesoreria`, `iam`— siguen a la colocación por detrás: son de sólo lectura salvo `region`, que
+asigna ejecutivo a la distribuidora y por eso sólo corre con `RE2E_DISTRIBUIDORA` explícita. Lo que
+falte en los datos lo dejan como `##AVISO##` y siguen: un video entero no se tira por una póliza
+que todavía no llegó.
+
 ## Detalles que explican el código
 
 **Las esperas son `wait_for`, no `sleep`.** La cadena es asíncrona por Kafka: aprobar no activa la

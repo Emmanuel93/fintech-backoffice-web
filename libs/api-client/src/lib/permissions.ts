@@ -94,15 +94,19 @@ export const permissionsApi = {
 const MOCK_MATRIX: PermissionMatrix = {
   ADMIN: [
     'accounting.close', 'accounting.view', 'applications.analyze', 'applications.decide',
-    'applications.request-documents', 'applications.view', 'audit.view', 'beneficiaries.view',
-    'clients.assign-executive', 'clients.view', 'dashboard.commercial', 'dashboard.view',
-    'permissions.manage', 'permissions.view', 'portfolio.view', 'products.manage',
-    'salesorg.manage', 'salesorg.view',
+    'applications.request-documents', 'applications.view', 'audit.view',
+    'beneficiaries.review-identity', 'beneficiaries.view', 'clients.assign-executive',
+    'clients.view', 'compliance.adjudicate', 'compliance.review-identity', 'compliance.view',
+    'dashboard.commercial', 'dashboard.view', 'permissions.manage', 'permissions.view',
+    'portfolio.view', 'products.manage', 'salesorg.manage', 'salesorg.view', 'treasury.view',
   ],
+  // Operación ve tesorería sin ver el mayor: la pregunta que le llega es «¿ya le llegó su
+  // dinero?», y se contesta con la clave de rastreo, no con la balanza.
   OPS_SUPERVISOR: [
-    'applications.view', 'beneficiaries.view', 'clients.assign-executive', 'clients.view',
-    'dashboard.commercial', 'dashboard.view', 'permissions.view', 'portfolio.view',
-    'salesorg.manage', 'salesorg.view',
+    'applications.view', 'beneficiaries.review-identity', 'beneficiaries.view',
+    'clients.assign-executive', 'clients.view', 'compliance.adjudicate',
+    'compliance.review-identity', 'compliance.view', 'dashboard.commercial', 'dashboard.view',
+    'permissions.view', 'portfolio.view', 'salesorg.manage', 'salesorg.view', 'treasury.view',
   ],
   CREDIT_ANALYST: [
     'applications.analyze', 'applications.request-documents', 'applications.view',
@@ -127,14 +131,17 @@ const MOCK_MATRIX: PermissionMatrix = {
   // corte contable de lo que se está auditando.
   AUDITOR: [
     'accounting.view', 'applications.analyze', 'applications.view', 'audit.view',
-    'beneficiaries.view', 'clients.view', 'dashboard.commercial', 'dashboard.view',
-    'portfolio.view', 'salesorg.view',
+    'beneficiaries.view', 'clients.view', 'compliance.view', 'dashboard.commercial',
+    'dashboard.view', 'portfolio.view', 'salesorg.view', 'treasury.view',
   ],
   FINANCE: [
     'accounting.close', 'accounting.view', 'dashboard.commercial', 'dashboard.view',
-    'portfolio.view', 'salesorg.view',
+    'portfolio.view', 'salesorg.view', 'treasury.view',
   ],
   PRODUCT_MANAGER: ['dashboard.view', 'products.manage'],
-  SUPPORT: ['beneficiaries.view', 'clients.view', 'dashboard.view', 'portfolio.view'],
+  SUPPORT: [
+    'beneficiaries.review-identity', 'beneficiaries.view', 'clients.view', 'dashboard.view',
+    'portfolio.view',
+  ],
   COLLECTIONS_AGENT: ['portfolio.view'],
 };

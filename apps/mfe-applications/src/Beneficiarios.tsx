@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react';
 import {
   beneficiariesApi,
-  type IdentityStatus, type Placement, type PlacementStatus, type PlacementStep,
+  type BeneficiaryCaptured, type BeneficiaryConsent, type IdentityEvidence, type IdentityStatus,
+  type Placement, type PlacementStatus, type PlacementStep,
 } from '@bo/api-client';
 import {
-  useAsync, Badge, Block, Button, CardTitled, Chip, DataTable, Field, Footnote, Modal,
-  Select, StatCard, Stats, Timeline, Toolbar, Spinner,
-  count, dateTime, money, type Column, type Tone, type TimelineStep,
+  useAsync, Badge, Block, Button, CardTitled, Chip, DataTable, DefRow, Defs, Field, Footnote, Modal,
+  Select, StatCard, Stats, TextArea, Timeline, Toolbar, Spinner,
+  count, date, dateTime, money, type Column, type Tone, type TimelineStep,
 } from '@bo/design-system';
+import { Can } from '@bo/auth';
+import { VisorDocumentos } from './Expediente';
 
 /**
  * El estado del proceso, dicho como lo que pasó y no como lo que dice la base.
@@ -49,10 +52,11 @@ function estado(s: PlacementStatus) {
 /**
  * Colocaciones a beneficiarios · KYC.
  *
- * <p>Es una bandeja de vigilancia, no de operación: desde aquí no se aprueba ni se deposita nada
- * —eso lo hace la distribuidora desde su app, y el depósito lo resuelve credit-portfolio—. Lo que
- * se hace aquí es ver dónde se atoró una colocación y por qué, que es la pregunta que llega por
- * teléfono cuando una beneficiaria no recibió su dinero.
+ * <p>Desde aquí no se coloca ni se deposita nada —colocar lo decide la distribuidora desde su app,
+ * y el depósito lo resuelve credit-portfolio—. Lo que se hace aquí son dos cosas: ver dónde se
+ * atoró una colocación y por qué, que es la pregunta que llega por teléfono cuando una beneficiaria
+ * no recibió su dinero; y **dictaminar su identidad**, que es lo único de la colocación que firma
+ * la financiera.
  *
  * <p>La regla que ordena la pantalla: <b>validamos identidad, no riesgo</b>. El score que ve la
  * distribuidora es informativo y no bloquea; lo único que detiene el depósito es una identidad sin
@@ -162,16 +166,14 @@ export function Beneficiarios() {
                   sub="vivas y sin avanzar" />
       </Stats>
 
-      {/* Sin Incode conectado la verificación de identidad no la resuelve un proveedor: la mira
-          una persona. Pero el BFF sólo publica lectura de colocaciones, así que ese dictamen
-          todavía no tiene dónde registrarse. Decirlo es lo que evita que alguien revise y crea
-          que dejó constancia. */}
+      {/* Sin Incode conectado nadie más comprueba la identidad: terminar la liga deja el
+          expediente listo para revisión, no revisado. Decirlo arriba es lo que evita leer
+          «Identidad completa» como «ya la validó alguien». */}
       <div className="bo-alert bo-huerfanos">
-        <b>La identidad se comprueba fuera de esta pantalla.</b> El proveedor biométrico no está
-        conectado, así que hoy la verificación la resuelve el flujo de la distribuidora y aquí sólo
-        se vigila en qué paso va. <b>No hay dónde registrar un dictamen documental del beneficiario</b>:
-        el BFF publica estas colocaciones en sólo lectura. Para dictaminar documentos, el expediente
-        que sí lo permite es el de <b>Solicitudes de crédito</b>.
+        <b>La identidad la comprueba una persona de esta mesa.</b> El proveedor biométrico no está
+        conectado: la beneficiaria sube su INE y una selfie desde la liga, y aquí se comparan contra
+        lo que capturó. Abre la colocación para ver su expediente y firmar <b>Identidad comprobada</b>
+        o <b>No es ella</b>. Hasta que alguien lo haga, el depósito no sale.
       </div>
 
       <Toolbar>
@@ -228,8 +230,8 @@ export function Beneficiarios() {
         no bloquea la colocación — quien decide colocar es ella, y firma que asume el riesgo. Lo
         único que detiene el depósito es una identidad sin comprobar. El crédito fluye a la
         beneficiaria y <b>la deuda queda con la distribuidora</b>, así que estas colocaciones suman
-        en su línea, no en una cartera propia de la beneficiaria. Desde aquí sólo se mira: aprobar y
-        depositar ocurren en la app de la distribuidora y en credit-portfolio.
+        en su línea, no en una cartera propia de la beneficiaria. Lo único que se firma aquí es la
+        identidad; aprobar y depositar ocurren en la app de la distribuidora y en credit-portfolio.
       </Footnote>
 
       {abierta && (
@@ -237,6 +239,7 @@ export function Beneficiarios() {
           key={abierta.placementId}
           placement={abierta}
           onClose={() => setAbierta(null)}
+          onChanged={() => { setAbierta(null); state.reload(); }}
         />
       )}
     </>
@@ -244,15 +247,42 @@ export function Beneficiarios() {
 }
 
 /**
- * Por dónde pasó una colocación y dónde se detuvo.
+ * Por dónde pasó una colocación, dónde se detuvo, y con qué se dictamina su identidad.
  *
- * El recorrido es la respuesta a la única pregunta que trae a alguien a esta pantalla —«¿por qué no
- * le ha llegado su dinero?»— y se contesta leyendo en qué salto se paró y quién lo provocó.
+ * El recorrido es la respuesta a la pregunta que trae a alguien a esta pantalla —«¿por qué no le ha
+ * llegado su dinero?»— y se contesta leyendo en qué salto se paró y quién lo provocó. Cuando la
+ * respuesta es «nadie ha comprobado su identidad», el expediente y la firma están aquí mismo.
  */
-function PlacementModal({ placement, onClose }: { placement: Placement; onClose: () => void }) {
-  const state = useAsync(() => beneficiariesApi.detail(placement.placementId), [placement.placementId]);
+function PlacementModal({ placement: fila, onClose, onChanged }: {
+  placement: Placement;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const state = useAsync(() => beneficiariesApi.detail(fila.placementId), [fila.placementId]);
+  // La ficha es más fresca que la fila: entre listar y abrir pudo terminar la liga.
+  const placement = state.data?.placement ?? fila;
   const e = estado(placement.status);
-  const i = IDENTIDAD[placement.identityStatus];
+  const i = IDENTIDAD[placement.identityStatus] ?? { texto: placement.identityStatus, tono: 'muted' as Tone };
+  const evidencia = state.data?.identityEvidence ?? null;
+
+  const [motivo, setMotivo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setFailure(null);
+    try { await fn(); onChanged(); }
+    catch (err) { setFailure(err instanceof Error ? err.message : 'No se pudo registrar el dictamen'); }
+    finally { setBusy(false); }
+  };
+
+  // Se dictamina sobre el veredicto explícito, no sobre el derivado: `identityStatus` dice
+  // «en proceso» tanto si falta la selfie como si está todo y nadie lo ha mirado. Sin
+  // `identityDecision` —BFF anterior— se cae al derivado, que es lo más cercano.
+  const sinDictamen = placement.identityDecision
+    ? placement.identityDecision === 'PENDING'
+    : placement.identityStatus === 'PENDING' || placement.identityStatus === 'IN_PROGRESS';
+  const hayExpediente = !!evidencia?.available && (evidencia.documents ?? []).length > 0;
 
   const pasos: TimelineStep[] = (state.data?.timeline ?? []).map((s: PlacementStep, idx, todos) => ({
     label: `${estado(s.toStatus).texto}${s.reason ? ` — ${s.reason}` : ''}`,
@@ -264,8 +294,9 @@ function PlacementModal({ placement, onClose }: { placement: Placement; onClose:
   return (
     <Modal
       title={placement.beneficiaryName ?? 'Colocación'}
-      subtitle={`${placement.distributorName ?? 'Distribuidora'} · ${money(placement.amount)}${placement.termFortnights ? ` a ${placement.termFortnights} quincenas` : ''}`}
+      subtitle={`${placement.distributorName ?? fila.distributorName ?? 'Distribuidora'} · ${money(placement.amount)}${placement.termFortnights ? ` a ${placement.termFortnights} quincenas` : ''}`}
       onClose={onClose}
+      size="wide"
       actions={<Badge tone={e.tono}>{e.texto}</Badge>}
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -288,6 +319,68 @@ function PlacementModal({ placement, onClose }: { placement: Placement; onClose:
         </div>
       </section>
 
+      <section style={{ marginBottom: 20 }}>
+        <div className="bo-grupo-cap">Su expediente de identidad</div>
+        {state.loading ? <Spinner /> : state.error ? (
+          <p className="bo-page-sub">No se pudo leer el expediente: {state.error}</p>
+        ) : (
+          <Evidencia placementId={placement.placementId} evidencia={evidencia} />
+        )}
+      </section>
+
+      {placement.identityDecidedBy && (
+        <section style={{ marginBottom: 20 }}>
+          <div className="bo-grupo-cap">Dictamen</div>
+          <Defs className="cols-3">
+            <DefRow k="Firmó" v={placement.identityDecidedBy} />
+            <DefRow k="Cuándo" v={dateTime(placement.identityDecidedAt ?? null)} />
+            <DefRow k="Origen" v={placement.identityVerificationSource === 'MANUAL' || !placement.identityVerificationSource
+              ? 'Revisión manual' : placement.identityVerificationSource} />
+          </Defs>
+          {placement.identityRejectionReason && (
+            <p style={{ fontSize: 13, color: 'var(--bo-bad)', margin: '8px 0 0' }}>
+              Motivo: {placement.identityRejectionReason}
+            </p>
+          )}
+        </section>
+      )}
+
+      {!state.loading && sinDictamen && hayExpediente && (
+        <Can
+          capability="beneficiaries.review-identity"
+          fallback={<p className="bo-page-sub">Tu rol puede ver este expediente, pero no dictaminar la identidad.</p>}
+        >
+          <section style={{ ...cajaStyle, marginBottom: 20 }}>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600 }}>¿Es ella?</h4>
+            <p className="bo-page-sub" style={{ margin: '0 0 10px' }}>
+              Compara la foto de la INE con la selfie, y el nombre, la CURP y la fecha de nacimiento
+              de la credencial contra lo que capturó. Tu firma es lo único que habilita el depósito.
+            </p>
+            <Field label="Motivo" hint="Obligatorio si no es ella: queda en el expediente y es lo que se le explica a la distribuidora.">
+              <TextArea value={motivo} onChange={setMotivo} rows={2} placeholder="Qué no coincide" />
+            </Field>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={() => run(() => beneficiariesApi.reviewIdentity(placement.placementId, 'VERIFIED'))}
+              >
+                Identidad comprobada
+              </Button>
+              <Button
+                variant="danger"
+                disabled={busy || !motivo.trim()}
+                title={!motivo.trim() ? 'Escribe qué no coincide para poder rechazar' : undefined}
+                onClick={() => run(() => beneficiariesApi.reviewIdentity(placement.placementId, 'REJECTED', motivo.trim()))}
+              >
+                No es ella
+              </Button>
+            </div>
+            {failure && <p style={{ fontSize: 13, color: 'var(--bo-bad)', margin: '10px 0 0' }}>{failure}</p>}
+          </section>
+        </Can>
+      )}
+
       <section>
         <div className="bo-grupo-cap">Por dónde pasó</div>
         {state.loading ? <Spinner /> : state.error ? (
@@ -301,6 +394,97 @@ function PlacementModal({ placement, onClose }: { placement: Placement; onClose:
     </Modal>
   );
 }
+
+/**
+ * Lo que ella entregó en la liga: INE, selfie, sus datos y lo que firmó.
+ *
+ * Cada parte se degrada sola. Una beneficiaria que se quedó en la selfie tiene documentos y no
+ * datos, y eso se dice así en vez de esconder la sección entera.
+ */
+function Evidencia({ placementId, evidencia }: { placementId: string; evidencia: IdentityEvidence | null }) {
+  if (!evidencia) {
+    return <p className="bo-page-sub">El servicio no publicó evidencia de identidad para esta colocación.</p>;
+  }
+  if (!evidencia.available) {
+    return (
+      <p className="bo-page-sub">
+        Todavía no hay expediente que revisar{evidencia.reason ? `: ${evidencia.reason}` : '.'}
+      </p>
+    );
+  }
+  const docs = evidencia.documents ?? [];
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {docs.length === 0 ? (
+        <p className="bo-page-sub">No subió documentos.</p>
+      ) : (
+        <VisorDocumentos
+          docs={docs.map((d) => ({ ...d, key: d.documentType }))}
+          abrir={(tipo) => beneficiariesApi.documentUrl(placementId, tipo)}
+        />
+      )}
+      <div>
+        <h5 style={h5Style}>Lo que capturó</h5>
+        {evidencia.captured ? <Capturado c={evidencia.captured} /> : (
+          <p className="bo-page-sub">Todavía no confirma sus datos.</p>
+        )}
+      </div>
+      <div>
+        <h5 style={h5Style}>Lo que firmó</h5>
+        <Consentimientos consents={evidencia.consents ?? []} />
+      </div>
+    </div>
+  );
+}
+
+function Capturado({ c }: { c: BeneficiaryCaptured }) {
+  const domicilio = [
+    [c.street, c.exteriorNumber].filter(Boolean).join(' '),
+    c.neighborhood, c.municipality, c.city, c.state, c.postalCode && `CP ${c.postalCode}`,
+  ].filter(Boolean).join(', ');
+  return (
+    <Defs className="cols-3">
+      <DefRow k="Nombre(s)" v={c.firstName ?? '—'} />
+      <DefRow k="Primer apellido" v={c.lastName1 ?? '—'} />
+      <DefRow k="Segundo apellido" v={c.lastName2 ?? '—'} />
+      <DefRow k="CURP" v={<code>{c.curp ?? '—'}</code>} />
+      <DefRow k="RFC" v={<code>{c.rfc ?? '—'}</code>} />
+      <DefRow k="Nacimiento" v={date(c.dateOfBirth)} />
+      <DefRow k="Ocupación" v={c.occupation ?? '—'} />
+      <DefRow k="Ingreso mensual" v={c.monthlyIncome != null ? money(c.monthlyIncome) : '—'} />
+      <DefRow k="CLABE del depósito" v={<code>{c.clabeMasked ?? '—'}</code>} />
+      <DefRow k="Domicilio" v={domicilio || '—'} />
+    </Defs>
+  );
+}
+
+const CONSENTIMIENTO: Record<string, string> = {
+  PRIVACY_NOTICE: 'Aviso de privacidad',
+  BUREAU_AUTHORIZATION: 'Consulta a buró y círculo de crédito',
+  CREDIT_OWNERSHIP: 'Entiende que el crédito es suyo',
+};
+
+function Consentimientos({ consents }: { consents: BeneficiaryConsent[] }) {
+  if (consents.length === 0) return <p className="bo-page-sub">Todavía no firma su autorización.</p>;
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      {consents.map((c) => (
+        <div key={c.consentType} style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 13 }}>
+          <Badge tone="ok">Aceptado</Badge>
+          <b>{CONSENTIMIENTO[c.consentType] ?? c.consentType}</b>
+          {/* La versión y la IP son lo que convierte una casilla marcada en evidencia: qué texto
+              aceptó y desde dónde. */}
+          <span className="bo-sub" style={{ marginTop: 0 }}>
+            {dateTime(c.acceptedAt)} · texto {c.textVersion ?? '—'} · IP {c.ipAddress ?? '—'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const cajaStyle = { padding: 14, borderRadius: 'var(--bo-radius)', border: '1px solid var(--bo-border)' } as const;
+const h5Style = { margin: '0 0 6px', fontSize: 12, color: 'var(--bo-text-muted)' } as const;
 
 function actorLabel(a: string): string {
   const map: Record<string, string> = {

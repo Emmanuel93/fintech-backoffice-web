@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Levanta el shell + los 10 remotes en dev (Vite), y los mantiene arriba.
+# Levanta el shell + los 10 remotes en dev (Vite), y los mantiene arriba. También la liga pública
+# de la beneficiaria (kyc-web, :4300): no es un remote ni pasa por el shell, pero sin ella no hay
+# a dónde mandar el enlace que genera la distribuidora.
 #
 # Los vigila en vez de sólo lanzarlos porque un remote caído no se nota hasta que
 # alguien abre ese módulo y recibe «Failed to load script resources» — un error de
@@ -14,9 +16,11 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 NOMBRES=(shell mfe-dashboard mfe-portfolio mfe-clients mfe-products
-         mfe-applications mfe-salesorg mfe-audit mfe-rbac mfe-collections mfe-accounting)
+         mfe-applications mfe-salesorg mfe-audit mfe-rbac mfe-collections mfe-accounting
+         kyc-web)
 PUERTOS=(4200  5101          5102          5103        5104
-         5105             5106         5107      5108     5109           5110)
+         5105             5106         5107      5108     5109           5110
+         4300)
 
 PIDS=()
 VIVO=1

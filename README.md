@@ -247,6 +247,7 @@ para saber qué levantar cuando algo viene vacío.
 | **Cobranza** | `portfolio.view` | `/collections/{cases,payment-promises,contact-attempts,agreements,bureau-reports,config}` | collections |
 | **Producto** | `products.manage` para escribir | `/products[/{id}]`, `/scoring/{policies,rule-types}` | credit-product · scoring |
 | **Contabilidad** | `accounting.view` · `.close` | `/accounting/{summary,periods,vouchers,trial-balance,loans,units}`, `/invoices`, `/billing-runs` | accounting · invoicing |
+| **Bancos y tesorería** | `treasury.view` | `/treasury/{bank-accounts,payout-routes,disbursements[/{id}]}` | banking · disbursement · stp |
 | **Estructura comercial** | `salesorg.view` · `.manage` | `/sales-org/**`, `/dashboard/commercial[/by-origin-unit]` | sales-org · credit-portfolio |
 | **Usuarios** | rol `ADMIN` | `/staff[/{id}]` y sus verbos | identity · sales-org |
 | **Roles · Permisos** | `permissions.view` · `.manage` | `/permissions/{roles,capabilities,matrix}` | identity |

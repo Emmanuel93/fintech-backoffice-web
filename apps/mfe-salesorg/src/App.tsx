@@ -145,7 +145,7 @@ function AvisoAlcance({ alcance, unidades }: { alcance: AlcanceComercial; unidad
       <span>
         {alcance.orgWide
           ? <>Alcance <b>completo</b>: la red entera.</>
-          : <>Tu alcance: <b>{nombre}</b> y todo lo que cuelga de ella.</>}
+          : <>Tu alcance: <b>{nombre}</b> y todo lo que depende de ella.</>}
         {' '}
         <span className="bo-page-sub" style={{ display: 'inline' }}>
           {count(alcance.unitIds.length)} unidades
@@ -239,7 +239,7 @@ function Cuerpo({ alcance, cartera, levels, units, onCambio }: {
               {d.unassigned && d.unassigned.accounts > 0 && (
                 <div className="bo-alert bo-huerfanos">
                   <b>{money(d.unassigned.principal)}</b> en {count(d.unassigned.accounts)} cuentas
-                  vivas <b>no cuelgan de ninguna rama</b>: su cliente no tiene ejecutivo asignado.
+                  vivas <b>no están asignadas a ninguna rama</b>: su cliente no tiene ejecutivo.
                   No entran en los números de arriba ni en la meta de ninguna sucursal.
                   <span className="bo-page-sub" style={{ display: 'block', marginTop: 4 }}>
                     Con ellas, la red suma {money(d.unassigned.networkPrincipal)} en{' '}

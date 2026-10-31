@@ -7,6 +7,7 @@ import {
 import { ApplicationModal } from './ApplicationModal';
 import { ETAPAS, Pipeline } from './Pipeline';
 import { Beneficiarios } from './Beneficiarios';
+import { Cumplimiento } from './Cumplimiento';
 
 ensureThemeStyles();
 
@@ -26,8 +27,8 @@ const AUDIENCES = ['B2C', 'B2B', 'B2B2C'];
  * lo que hace la mesa de comité. Tiene ruta propia (`/solicitudes/decidir`) porque es una bandeja
  * de trabajo: se entra a ella varias veces al día y se manda por enlace a quien tiene que firmar.
  */
-type Vista = 'bandeja' | 'decidir' | 'beneficiarios';
-const VISTAS: readonly Vista[] = ['bandeja', 'decidir', 'beneficiarios'];
+type Vista = 'bandeja' | 'decidir' | 'beneficiarios' | 'cumplimiento';
+const VISTAS: readonly Vista[] = ['bandeja', 'decidir', 'beneficiarios', 'cumplimiento'];
 
 export function App({ vista: vistaRuta }: { vista?: string } = {}) {
   const [vista, setVista] = useVista<Vista>(vistaRuta, VISTAS, 'bandeja');
@@ -48,6 +49,21 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
           subtitle="Lo que esta consola valida de un beneficiario es su identidad, y nada más. Quién decide colocarle crédito —y asume el riesgo— es su distribuidora; el historial que ella ve es informativo y no bloquea."
         />
         <Beneficiarios />
+      </div>
+    );
+  }
+
+  // Cumplimiento cruza los dos embudos: la misma persona —pida para sí o la coloque una
+  // distribuidora— tiene una sola verificación de identidad y de listas. Vive aquí porque es la
+  // compuerta de originar, y separarla en otro remote sería cargar otro módulo para la misma INE.
+  if (vista === 'cumplimiento') {
+    return (
+      <div>
+        <PageHeader
+          title="Cumplimiento · identidad y listas"
+          subtitle="Una verificación por persona, para cualquier producto: que sea quien dice ser y que no sea la persona de una lista. Sin proveedor biométrico, las dos las firma alguien de esta mesa."
+        />
+        <Cumplimiento />
       </div>
     );
   }

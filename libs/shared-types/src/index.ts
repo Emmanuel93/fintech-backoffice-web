@@ -98,6 +98,19 @@ export type Capability =
   // `BeneficiariesController`; sin declararla aquí, TypeScript rechazaba gatear la pantalla con
   // ella y la entrada del menú se quedaba sin permiso que comprobar.
   | 'beneficiaries.view'
+  // Dictaminar la identidad de una beneficiaria. Va aparte de `.view` porque vigilar la bandeja y
+  // firmar que la persona es quien dice ser son actos distintos: el segundo habilita un depósito.
+  | 'beneficiaries.review-identity'
+  // La mesa de cumplimiento: KYC y listas por persona, para cualquier producto. Mirar, dictaminar
+  // la identidad y resolver una coincidencia en listas son tres firmas distintas — confirmar una
+  // homonimia bloquea a alguien, y eso no debe venir incluido con poder leer la cola.
+  | 'compliance.view'
+  | 'compliance.review-identity'
+  | 'compliance.adjudicate'
+  // Bancos y tesorería: por dónde sale el dinero y cada SPEI con su rastro. Va aparte de
+  // `accounting.view` porque operación necesita contestar «¿ya le llegó?» sin leer el mayor, y
+  // quien lee el mayor necesita ver la cuenta ordenante sin poder mover nada en ella.
+  | 'treasury.view'
   | 'clients.view'
   | 'clients.assign-executive'
   | 'dashboard.view'
