@@ -33,9 +33,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# `--force`: Vite precompila las librerías compartidas (@bo/*) en node_modules/.vite y no se entera cuando cambia su
+# fuente; sin esto, un arranque sirve la copia vieja y el remote truena con «does not provide an export named …»
+# aunque el código esté bien (la caché de agosto sobrevivió así a dos reinicios). Cuesta unos segundos por app.
 arranca() { # índice
   local i=$1
-  ( cd "apps/${NOMBRES[$i]}" && exec npx vite --port "${PUERTOS[$i]}" --strictPort ) &
+  ( cd "apps/${NOMBRES[$i]}" && exec npx vite --port "${PUERTOS[$i]}" --strictPort --force ) &
   PIDS[$i]=$!
 }
 

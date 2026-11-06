@@ -31,6 +31,14 @@ function puertoDelError(message: string): string | null {
   return /localhost:(\d{4,5})/.exec(message)?.[1] ?? null;
 }
 
+/**
+ * The remote answered, but a shared library (@bo/*) it imports is an old copy: Vite's cache of the dev server, not
+ * the code. Only a restart that rebuilds the cache fixes it (run-dev.sh starts Vite with --force).
+ */
+function esCopiaVieja(message: string): boolean {
+  return /does not provide an export named/.test(message);
+}
+
 class RemoteBoundary extends Component<{ name: string; children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -43,11 +51,17 @@ class RemoteBoundary extends Component<{ name: string; children: ReactNode }, { 
           <b>No se pudo cargar el módulo «{this.props.name}».</b>
           <p className="bo-page-sub">{error.message}</p>
           <p className="bo-page-sub">
-            {puerto
-              ? <>Nadie está sirviendo el puerto <b>{puerto}</b>. </>
-              : <>El remote no responde. </>}
-            Si <code>./run-dev.sh</code> lleva corriendo desde antes de que este módulo existiera, no
-            lo lanzó: reinícialo para que tome la lista completa.
+            {esCopiaVieja(error.message)
+              ? <>El módulo respondió, pero el servidor de desarrollo le sirve una copia vieja de una librería
+                  compartida (<code>@bo/…</code>) que cambió después de arrancar. Reinicia <code>./run-dev.sh</code>:
+                  arranca Vite con <code>--force</code> y las vuelve a empaquetar.</>
+              : <>
+                  {puerto
+                    ? <>Nadie está sirviendo el puerto <b>{puerto}</b>. </>
+                    : <>El remote no responde. </>}
+                  Si <code>./run-dev.sh</code> lleva corriendo desde antes de que este módulo existiera, no
+                  lo lanzó: reinícialo para que tome la lista completa.
+                </>}
           </p>
         </div></div>
       );
