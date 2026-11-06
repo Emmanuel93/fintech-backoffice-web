@@ -101,22 +101,34 @@ test.describe('Demo completa · cada peso, asentado solo', () => {
       return filas;
     });
 
-    await test.step('egreso: desembolso, cargo a cartera y abono a bancos', async () => {
+    // The disposition is booked on the portfolio's day against SPEI to settle (2103); the bank's report of the order,
+    // on its operation date, takes it out of Bancos (1101). Two vouchers, and the loan shows both.
+    await test.step('egreso: desembolso a SPEI por liquidar, y el banco lo saca de bancos', async () => {
       historia('egreso');
       if (!polizas) { await page.waitForTimeout(3000); return; }
-      const egresos = polizas.filter({ hasText: 'Egreso' }).filter({ hasText: /Disposición|SPEI|tercero/i });
-      const suya = egresos.filter({ hasText: /45,000/ }).first();
-      const fila = (await suya.count()) ? suya : egresos.first();
+      const disposiciones = polizas.filter({ hasText: /Disposición|tercero/i });
+      const suya = disposiciones.filter({ hasText: /45,000/ }).first();
+      const fila = (await suya.count()) ? suya : disposiciones.first();
       if (!(await fila.count())) {
-        aviso('no hay póliza de egreso de la disposición en el período');
+        aviso('no hay póliza de la disposición en el período');
         await page.waitForTimeout(3000);
         return;
       }
-      await senala(page, fila, 'Egreso: el crédito sale por SPEI', 2800);
-      const modal = await abrirPoliza(page, fila);
+      await senala(page, fila, 'Disposición: el crédito sale por SPEI', 2800);
+      let modal = await abrirPoliza(page, fila);
       await senalaLinea(page, modal, '1201', 'Cargo · Cartera de crédito vigente');
-      await senalaLinea(page, modal, '1101', 'Abono · Bancos / SPEI');
+      await senalaLinea(page, modal, '2103', 'Abono · SPEI por liquidar');
       await senalaCuadre(page, modal);
+      await cerrar(page);
+      const salida = polizas.filter({ hasText: 'Egreso' }).filter({ hasText: /liquidada por el banco/i }).first();
+      if (!(await salida.count())) {
+        aviso('no hay póliza del banco que reporte la orden en el período');
+        return;
+      }
+      await senala(page, salida, 'Egreso: el banco reporta la orden', 2800);
+      modal = await abrirPoliza(page, salida);
+      await senalaLinea(page, modal, '2103', 'Cargo · SPEI por liquidar');
+      await senalaLinea(page, modal, '1101', 'Abono · Bancos, en la fecha de operación');
       await cerrar(page);
     });
 
@@ -147,7 +159,7 @@ test.describe('Demo completa · cada peso, asentado solo', () => {
       }
     });
 
-    await test.step('pago: entra a bancos y salda la cartera', async () => {
+    await test.step('pago: salda la cartera al recibirlo, y el banco lo acredita', async () => {
       historia('pago');
       if (!polizas) { await page.waitForTimeout(3000); return; }
       const pago = polizas.filter({ hasText: 'Pago recibido' }).first();
@@ -156,12 +168,22 @@ test.describe('Demo completa · cada peso, asentado solo', () => {
         await page.waitForTimeout(3000);
         return;
       }
-      await senala(page, pago, 'Ingreso: el pago se aplica automáticamente', 2800);
-      const modal = await abrirPoliza(page, pago);
-      await senalaLinea(page, modal, '1101', 'Cargo · Bancos: entra el pago');
+      await senala(page, pago, 'Pago: se aplica al recibirlo', 2800);
+      let modal = await abrirPoliza(page, pago);
+      await senalaLinea(page, modal, '1103', 'Cargo · Cobranza SPEI por acreditar');
       await senalaLinea(page, modal, '1201', 'Abono · Cartera: baja el capital');
       await senalaLinea(page, modal, '1203', 'Abono · Intereses: se cobran');
       await senalaCuadre(page, modal);
+      await cerrar(page);
+      const abono = polizas.filter({ hasText: 'Ingreso' }).filter({ hasText: /acreditado por el banco/i }).first();
+      if (!(await abono.count())) {
+        aviso('no hay póliza del banco que acredite el abono en el período');
+        return;
+      }
+      await senala(page, abono, 'Ingreso: el banco acredita el abono', 2800);
+      modal = await abrirPoliza(page, abono);
+      await senalaLinea(page, modal, '1101', 'Cargo · Bancos, en la fecha de operación');
+      await senalaLinea(page, modal, '1103', 'Abono · Cobranza SPEI por acreditar');
       await cerrar(page);
     });
 

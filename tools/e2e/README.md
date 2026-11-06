@@ -57,7 +57,15 @@ liquidarse tomaría meses reales.
 
 **`browser/`** — `rbac.spec.ts` (un recorrido grabado por rol), `journey.spec.ts` (la cuenta en
 cartera, su calendario, sus pagos y el tablero movido), `theme.spec.ts` (claro/oscuro, que
-persista y que el contraste aguante en ambos).
+persista y que el contraste aguante en ambos), `regresion-estados-de-cuenta.spec.ts` (los estados de
+cuenta desde el expediente de un cliente y de un distribuidor: la lista, «Ver» dentro de la ficha,
+«Descargar» el PDF de statement-service con su nombre, tiempos de la lista y de la descarga, y que un
+estado de otro titular conteste 404 aunque se pida a mano). Elige al cliente y al distribuidor por la
+API —el primero con estados—, así que corre sobre cualquier siembra. `regresion-balanza-por-producto.spec.ts`
+(la balanza del último mes cerrado, producto por producto: cada uno cuadra por sí mismo, «Institución» reúne el
+fondeo y el capital, y las partes suman la balanza cuenta por cuenta; el esquema contable de cada producto suma sus
+pares; en pantalla, el selector «Producto» filtra la balanza, trae el esquema y oculta la ecuación, que es de toda la
+institución; con tiempos por balanza).
 
 **`browser/regresion-*.spec.ts`** — los actos del video que arma el orquestador de
 `fintech-services/tools/regresion-e2e`. Cada uno marca sus momentos con `historia(clave)` y señala
