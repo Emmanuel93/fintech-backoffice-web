@@ -111,6 +111,9 @@ export type Capability =
   // `accounting.view` porque operación necesita contestar «¿ya le llegó?» sin leer el mayor, y
   // quien lee el mayor necesita ver la cuenta ordenante sin poder mover nada en ella.
   | 'treasury.view'
+  // Registrar el fondeo: aportaciones de capital, líneas de fondeo, sus disposiciones, intereses y pagos. Tesorería y
+  // el administrador; quien sólo mira tesorería lo lee con `treasury.view`.
+  | 'treasury.funding'
   | 'clients.view'
   | 'clients.assign-executive'
   | 'dashboard.view'
@@ -120,7 +123,9 @@ export type Capability =
   | 'portfolio.view'
   | 'products.manage'
   | 'salesorg.view'
-  | 'salesorg.manage';
+  | 'salesorg.manage'
+  // Gestión de cobranza: entre otras cosas, marcar a un cliente de distribuidora en lista roja o levantar la marca.
+  | 'collections.manage';
 
 /* ============================ Dashboard ============================ */
 
@@ -367,6 +372,165 @@ export interface CreditApplication {
 export interface ClientDetail extends Client {
   accounts: CreditAccount[];
   applications: CreditApplication[];
+}
+
+/* ============================ Estados de cuenta ============================ */
+
+export type StatementStatus = 'PENDING' | 'GENERATING' | 'GENERATED' | 'FAILED';
+
+/**
+ * A statement that statement-service generated at a cutoff. The PDF is not here: it is requested
+ * apart, from the file of its holder, and only when `downloadable` (generated).
+ */
+export interface AccountStatement {
+  statementId: string;
+  creditAccountId: string;
+  contractNumber: string | null;
+  productType: ProductType;
+  cycleNumber: number;
+  periodStart: string | null;
+  cutoffDate: string;
+  paymentDueDate: string | null;
+  balanceAtCutoff: number;
+  amountDue: number | null;
+  minimumPayment: number | null;
+  status: StatementStatus;
+  documentBytes: number | null;
+  generatedAt: string | null;
+  downloadable: boolean;
+}
+
+/** The statements of a client or a distributor: those of every account of the party. */
+export interface PartyStatements {
+  accounts: Array<{ creditAccountId: string; contractNumber: string; productType: ProductType; status: AccountStatus }>;
+  statements: AccountStatement[];
+}
+
+/* ============================ Recibos de pago y lista roja ============================ */
+
+/**
+ * NUEVO hasta que tiene un préstamo con alguna distribuidora totalmente pagado (quebranto y quita no cuentan);
+ * desde entonces REVOLVENTE. Decide qué límites de su sucursal le aplican.
+ */
+export type ClientType = 'NUEVO' | 'REVOLVENTE';
+
+export const CLIENT_TYPE_LABELS: Record<ClientType, string> = {
+  NUEVO: 'Cliente nuevo',
+  REVOLVENTE: 'Cliente revolvente',
+};
+
+/** El recibo de pago de un cliente de distribuidora por estado de cuenta: lo que paga sin el descuento de ella. */
+export interface PaymentReceipt {
+  receiptId: string;
+  creditAccountId: string;
+  cycleNumber: number;
+  beneficiaryPartyId: string;
+  distributorPartyId: string | null;
+  periodStart: string | null;
+  cutoffDate: string;
+  paymentDueDate: string | null;
+  status: StatementStatus;
+  folio: string | null;
+  clientName: string | null;
+  clientType: ClientType | null;
+  liveLoans: number | null;
+  totalDue: number | null;
+  paymentReference: number | null;
+  clabe: string | null;
+  documentBytes: number | null;
+  generatedAt: string | null;
+}
+
+/** Los recibos de un expediente: los de sus clientes si es distribuidora, los suyos si es cliente. */
+export interface PartyReceipts {
+  asDistributor: boolean;
+  receipts: PaymentReceipt[];
+}
+
+export type RedListReason = 'VOUCHER_IN_ARREARS' | 'DISTRIBUTOR_IN_ARREARS' | 'DISTRIBUTOR_REPORT';
+export type RedListSource = 'SYSTEM' | 'DISTRIBUTOR' | 'BACKOFFICE';
+/** El catálogo del reporte: lo que la distribuidora (o el backoffice) dice del cliente; los comentarios dicen el resto. */
+export type ReportReason = 'VOUCHER_UNPAID' | 'REFUSES_TO_PAY' | 'NOT_LOCATABLE' | 'MISCONDUCT' | 'SUSPECTED_FRAUD' | 'OTHER';
+
+export const RED_LIST_REASON_LABELS: Record<RedListReason, string> = {
+  VOUCHER_IN_ARREARS: 'Vale en mora',
+  DISTRIBUTOR_IN_ARREARS: 'Su distribuidora está en mora',
+  DISTRIBUTOR_REPORT: 'Reporte',
+};
+
+export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
+  VOUCHER_UNPAID: 'No ha pagado su vale',
+  REFUSES_TO_PAY: 'Se niega a pagar',
+  NOT_LOCATABLE: 'No se le localiza',
+  MISCONDUCT: 'Mala conducta',
+  SUSPECTED_FRAUD: 'Sospecha de fraude',
+  OTHER: 'Otro motivo',
+};
+
+/** Una marca vigente: derivada de su mora o de la de su distribuidora (sin id), o un reporte (con id). */
+export interface RedListMark {
+  flagId: string | null;
+  reason: RedListReason;
+  source: RedListSource;
+  since: string | null;
+  distributorPartyId: string | null;
+  creditAccountId: string | null;
+  detail: string | null;
+  comment: string | null;
+}
+
+/** Un reporte con su historia: quién lo puso, quién lo levantó y por qué. Nunca se borra. */
+export interface RedListRecord {
+  flagId: string;
+  reason: RedListReason;
+  source: RedListSource;
+  distributorPartyId: string | null;
+  detail: string | null;
+  comment: string | null;
+  raisedAt: string;
+  raisedBy: string | null;
+  clearedAt: string | null;
+  clearedBy: string | null;
+  clearComment: string | null;
+  active: boolean;
+}
+
+export interface ClientCreditProfile {
+  beneficiaryPartyId: string;
+  type: ClientType;
+  redListed: boolean;
+  flags: RedListMark[];
+  loansGranted: number;
+  loansPaid: number;
+  activeLoans: number;
+  outstanding: number;
+  history: RedListRecord[];
+}
+
+/** Lo que una distribuidora puede colocarle a un tipo de cliente; un límite nulo se hereda. */
+export interface ClientLimits {
+  maxLoanAmount: number | null;
+  maxOutstanding: number | null;
+  maxActiveLoans: number | null;
+  maxTerm: number | null;
+}
+
+export interface PlacementLimitsByType {
+  nuevo: ClientLimits | null;
+  revolvente: ClientLimits | null;
+}
+
+/** La política de colocación de una unidad (sólo línea de distribuidora): lo que declara y lo que le aplica. */
+export interface PlacementPolicy {
+  unitId: string;
+  code: string;
+  levelCode: string | null;
+  productType: 'DISTRIBUTOR_LINE';
+  configured: boolean;
+  /** La unidad más profunda que declaró algo en el camino; nulo si nada aplica. */
+  inheritedFrom: string | null;
+  declared: PlacementLimitsByType | null;
+  effective: PlacementLimitsByType | null;
 }
 
 /* ============================ Distribuidores ============================ */

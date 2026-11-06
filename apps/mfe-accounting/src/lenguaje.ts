@@ -134,6 +134,8 @@ const MESES = [
 export function periodoLabel(period: string): string {
   if (!/^\d{6}$/.test(period)) return period;
   const mes = Number(period.slice(4, 6));
+  // Period 13: the year-end close (SAT's «balanza de cierre del ejercicio»), after December.
+  if (mes === 13) return `cierre del ejercicio ${period.slice(0, 4)}`;
   if (mes < 1 || mes > 12) return period;
   return `${MESES[mes - 1]} ${period.slice(0, 4)}`;
 }

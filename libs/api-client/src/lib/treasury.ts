@@ -149,6 +149,75 @@ export interface DisbursementsQuery {
   size?: number;
 }
 
+/* ============================ Fondeo ============================ */
+
+/**
+ * Where the money the institution lends comes from. A SOFOM ENR does not take deposits from the public: it lends its
+ * capital and what financial institutions or other entities lend it. Each source names its counterparty (RFC) and its
+ * document (shareholders' meeting minutes, credit agreement).
+ */
+export interface FundingSource {
+  fundingSourceId: string;
+  kind: 'CAPITAL' | 'CREDIT_LINE';
+  counterpartyType: 'SHAREHOLDER' | 'BANK' | 'DEVELOPMENT_BANK' | 'OTHER_ENTITY';
+  counterpartyName: string;
+  counterpartyRfc: string;
+  contractReference: string;
+  bankAccountId: string;
+  /** Subscribed capital, or the line's limit. */
+  authorizedAmount: number;
+  /** A line's annual rate, as a fraction. */
+  annualRate: number | null;
+  openingFee: number;
+  openingFeePaid: boolean;
+  startDate: string;
+  maturityDate: string | null;
+  status: 'ACTIVE' | 'CLOSED';
+  contributed: number;
+  principal: number;
+  interestPayable: number;
+  /** The last day the line's interest is accrued through. */
+  accruedThrough: string | null;
+  available: number;
+}
+
+export type FundingMovementType =
+  | 'CONTRIBUTION' | 'DRAWDOWN' | 'OPENING_FEE' | 'INTEREST_ACCRUAL' | 'INTEREST_PAYMENT' | 'PRINCIPAL_REPAYMENT';
+
+export interface FundingMovement {
+  fundingMovementId: string;
+  fundingSourceId: string;
+  type: FundingMovementType;
+  amount: number;
+  valueDate: string;
+  accruedFrom: string | null;
+  accruedThrough: string | null;
+  reference: string;
+  contributedAfter: number;
+  principalAfter: number;
+  interestPayableAfter: number;
+  recordedBy: string | null;
+  recordedAt: string;
+}
+
+export interface CapitalContributionInput {
+  shareholderName: string; rfc: string; minutesReference: string; bankAccountId: string;
+  subscribedAmount: number; agreedOn: string;
+}
+
+export interface CreditLineInput {
+  lenderType: 'BANK' | 'DEVELOPMENT_BANK' | 'OTHER_ENTITY' | 'SHAREHOLDER';
+  lenderName: string; rfc: string; agreementReference: string; bankAccountId: string;
+  authorizedAmount: number; annualRate: number; openingFee: number; startDate: string; maturityDate: string;
+}
+
+export interface FundingMovementInput {
+  type: Exclude<FundingMovementType, 'INTEREST_ACCRUAL'>;
+  amount?: number;
+  valueDate: string;
+  reference: string;
+}
+
 /* ============================ Cliente ============================ */
 
 export const treasuryApi = {
@@ -160,6 +229,37 @@ export const treasuryApi = {
   async payoutRoutes(): Promise<PayoutRoute[]> {
     if (!isMock()) return request<PayoutRoute[]>('/treasury/payout-routes');
     return MOCK_ROUTES;
+  },
+
+  async funding(): Promise<FundingSource[]> {
+    if (!isMock()) return request<FundingSource[]>('/treasury/funding');
+    return MOCK_FUNDING;
+  },
+
+  async fundingMovements(sourceId: string): Promise<FundingMovement[]> {
+    if (!isMock()) return request<FundingMovement[]>(`/treasury/funding/${encodeURIComponent(sourceId)}/movements`);
+    return MOCK_FUNDING_MOVEMENTS.filter((m) => m.fundingSourceId === sourceId);
+  },
+
+  /** Registers a capital contribution agreed by the shareholders' meeting. Needs `treasury.funding`. */
+  async registerCapital(input: CapitalContributionInput): Promise<FundingSource> {
+    return request<FundingSource>('/treasury/funding/capital', { method: 'POST', body: input });
+  },
+
+  /** Registers a funding line under its credit agreement. Needs `treasury.funding`. */
+  async registerCreditLine(input: CreditLineInput): Promise<FundingSource> {
+    return request<FundingSource>('/treasury/funding/credit-lines', { method: 'POST', body: input });
+  },
+
+  /** Records a contribution, drawdown, opening fee, interest payment or repayment; returns what it produced. */
+  async recordFunding(sourceId: string, input: FundingMovementInput): Promise<FundingMovement[]> {
+    return request<FundingMovement[]>(`/treasury/funding/${encodeURIComponent(sourceId)}/movements`,
+      { method: 'POST', body: input });
+  },
+
+  /** Accrues the lines' interest through a day (what the month-end close needs). */
+  async accrueFunding(through: string): Promise<FundingMovement[]> {
+    return request<FundingMovement[]>('/treasury/funding/accruals', { method: 'POST', query: { through } });
   },
 
   async disbursements(query: DisbursementsQuery = {}): Promise<Page<Disbursement>> {
@@ -426,3 +526,33 @@ function mockDetails(): Promise<DisbursementDetail[]> {
   });
   return cache;
 }
+
+const MOCK_FUNDING: FundingSource[] = [
+  {
+    fundingSourceId: 'f0000000-0000-4000-8000-000000000001', kind: 'CAPITAL', counterpartyType: 'SHAREHOLDER',
+    counterpartyName: 'Accionistas fundadores', counterpartyRfc: 'KHO200101AB1', contractReference: 'ACTA-AGE-2026-02-15',
+    bankAccountId: '9b1d0000-0000-4000-8000-000000000001', authorizedAmount: 4000000, annualRate: null, openingFee: 0,
+    openingFeePaid: false, startDate: '2026-02-15', maturityDate: null, status: 'ACTIVE', contributed: 4000000,
+    principal: 0, interestPayable: 0, accruedThrough: null, available: 0,
+  },
+  {
+    fundingSourceId: 'f0000000-0000-4000-8000-000000000002', kind: 'CREDIT_LINE', counterpartyType: 'DEVELOPMENT_BANK',
+    counterpartyName: 'Banco de fomento (simulado)', counterpartyRfc: 'BFS850101AB1', contractReference: 'CONTRATO-LF-2026-001',
+    bankAccountId: '9b1d0000-0000-4000-8000-000000000001', authorizedAmount: 5000000, annualRate: 0.13, openingFee: 25000,
+    openingFeePaid: true, startDate: '2026-03-01', maturityDate: '2029-03-01', status: 'ACTIVE', contributed: 0,
+    principal: 2000000, interestPayable: 0, accruedThrough: '2026-10-31', available: 3000000,
+  },
+];
+
+const MOCK_FUNDING_MOVEMENTS: FundingMovement[] = [
+  {
+    fundingMovementId: 'fm-1', fundingSourceId: MOCK_FUNDING[0].fundingSourceId, type: 'CONTRIBUTION', amount: 4000000,
+    valueDate: '2026-03-02', accruedFrom: null, accruedThrough: null, reference: 'SPEI-CAPITAL-1', contributedAfter: 4000000,
+    principalAfter: 0, interestPayableAfter: 0, recordedBy: 'tesoreria', recordedAt: '2026-03-02T18:00:00Z',
+  },
+  {
+    fundingMovementId: 'fm-2', fundingSourceId: MOCK_FUNDING[1].fundingSourceId, type: 'DRAWDOWN', amount: 2000000,
+    valueDate: '2026-03-02', accruedFrom: null, accruedThrough: null, reference: 'SPEI-LF-1', contributedAfter: 0,
+    principalAfter: 2000000, interestPayableAfter: 0, recordedBy: 'tesoreria', recordedAt: '2026-03-02T18:05:00Z',
+  },
+];

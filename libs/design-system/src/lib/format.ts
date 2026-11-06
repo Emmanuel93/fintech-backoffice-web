@@ -52,7 +52,10 @@ export function rate(v: number | null | undefined): string {
  */
 export function date(v: string | null | undefined): string {
   if (!v) return '—';
-  const d = new Date(v);
+  // A bare `YYYY-MM-DD` is a calendar day, not an instant. `new Date('2026-06-02')` is UTC midnight,
+  // which in Mexico City is still 1 June: every due date and cutoff showed one day early.
+  const calendar = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  const d = calendar ? new Date(Number(calendar[1]), Number(calendar[2]) - 1, Number(calendar[3])) : new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
 }

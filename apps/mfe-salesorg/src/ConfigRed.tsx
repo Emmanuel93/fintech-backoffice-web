@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { salesOrgApi, type SalesLevel, type SalesUnit } from '@bo/api-client';
+import type { ClientLimits, PlacementLimitsByType } from '@bo/shared-types';
 import {
   Badge, Button, Field, Modal, NumberInput, Select, Spinner, Tabs, TextInput,
   useAsync, percent,
@@ -25,12 +26,12 @@ export function ConfigRed({ niveles, unidades, onCerrar, onCambio }: {
   onCerrar: () => void;
   onCambio: () => void;
 }) {
-  const [vista, setVista] = useState<'niveles' | 'iva'>('niveles');
+  const [vista, setVista] = useState<'niveles' | 'iva' | 'colocacion'>('niveles');
 
   return (
     <Modal
       title="Configuración de la red"
-      subtitle="Los escalones de la jerarquía y el IVA que traslada cada rama"
+      subtitle="Los escalones de la jerarquía, el IVA de cada rama y lo que sus distribuidoras pueden colocar"
       onClose={onCerrar}
     >
       <Tabs
@@ -39,11 +40,14 @@ export function ConfigRed({ niveles, unidades, onCerrar, onCambio }: {
         tabs={[
           { value: 'niveles', label: 'Escalones', icon: '🪜' },
           { value: 'iva', label: 'IVA por unidad', icon: '🧾' },
+          { value: 'colocacion', label: 'Política de colocación', icon: '🤝' },
         ]}
       />
       {vista === 'niveles'
         ? <Niveles niveles={niveles} onCambio={onCambio} />
-        : <IvaPorUnidad unidades={unidades} onCambio={onCambio} />}
+        : vista === 'iva'
+          ? <IvaPorUnidad unidades={unidades} onCambio={onCambio} />
+          : <PoliticaColocacion unidades={unidades} />}
     </Modal>
   );
 }
@@ -256,6 +260,150 @@ function IvaPorUnidad({ unidades, onCambio }: { unidades: SalesUnit[]; onCambio:
       </div>
 
       {detalle.loading && !detalle.data && <Spinner />}
+      {error && <p style={{ color: 'var(--bo-bad)', fontSize: 13, marginTop: 12 }}>{error}</p>}
+    </>
+  );
+}
+
+const LIMITES: Array<{ key: keyof ClientLimits; label: string; suffix?: string; prefix?: string; hint: string }> = [
+  { key: 'maxLoanAmount', label: 'Monto por préstamo', prefix: '$', hint: 'Lo más que puede ser una colocación' },
+  { key: 'maxOutstanding', label: 'Saldo con la distribuidora', prefix: '$', hint: 'Lo que puede deber sumando sus préstamos vivos y el nuevo' },
+  { key: 'maxActiveLoans', label: 'Préstamos vivos', hint: 'A la vez, contando el nuevo' },
+  { key: 'maxTerm', label: 'Plazo', suffix: 'quincenas', hint: 'El más largo que se le puede dar' },
+];
+
+type Captura = Record<'nuevo' | 'revolvente', Record<keyof ClientLimits, string>>;
+
+const vacia = (): Captura => ({
+  nuevo: { maxLoanAmount: '', maxOutstanding: '', maxActiveLoans: '', maxTerm: '' },
+  revolvente: { maxLoanAmount: '', maxOutstanding: '', maxActiveLoans: '', maxTerm: '' },
+});
+
+/**
+ * Lo que las distribuidoras de una rama pueden colocarle a cada tipo de cliente.
+ *
+ * <p>Sólo existe para la línea de distribuidora: los créditos directos los acota el score. Se declara en la sucursal
+ * (o más arriba) y la hereda todo lo que cuelga de ella; una distribuidora puede tener la suya, sólo más estricta. Un
+ * límite que se deja vacío se hereda. sales-org la valida contra el producto (monto y plazo de la línea) al guardar.
+ */
+function PoliticaColocacion({ unidades }: { unidades: SalesUnit[] }) {
+  const [unitId, setUnitId] = useState('');
+  const [captura, setCaptura] = useState<Captura>(vacia());
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
+  const elegida = unidades.find((u) => u.unitId === unitId);
+  const politica = useAsync(
+    () => (elegida ? salesOrgApi.placementPolicy(elegida.code) : Promise.resolve(null)),
+    [elegida?.code],
+  );
+
+  const numero = (v: string) => (v.trim() === '' ? null : Number(v));
+  const invalido = (Object.values(captura) as Array<Record<keyof ClientLimits, string>>)
+    .some((c) => Object.values(c).some((v) => v.trim() !== '' && (!Number.isFinite(Number(v)) || Number(v) <= 0)));
+
+  const cuerpo = (): PlacementLimitsByType => {
+    const uno = (c: Record<keyof ClientLimits, string>): ClientLimits | null => {
+      const l: ClientLimits = {
+        maxLoanAmount: numero(c.maxLoanAmount), maxOutstanding: numero(c.maxOutstanding),
+        maxActiveLoans: numero(c.maxActiveLoans), maxTerm: numero(c.maxTerm),
+      };
+      return Object.values(l).every((v) => v == null) ? null : l;
+    };
+    return { nuevo: uno(captura.nuevo), revolvente: uno(captura.revolvente) };
+  };
+
+  const guardar = async (limpiar: boolean) => {
+    if (!elegida) return;
+    setGuardando(true); setError(null); setHecho(null);
+    try {
+      const r = limpiar ? await salesOrgApi.clearPlacementPolicy(elegida.code)
+        : await salesOrgApi.setPlacementPolicy(elegida.code, cuerpo());
+      setHecho(limpiar ? `${elegida.name} vuelve a heredar la política de su rama superior.`
+        : `${elegida.name} y lo que cuelga de ella colocan con su política${r.inheritedFrom && r.inheritedFrom !== elegida.code ? ` (más lo que hereda de ${r.inheritedFrom})` : ''}.`);
+      setCaptura(vacia());
+      politica.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar la política');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const efectiva = politica.data?.effective;
+  const declarada = politica.data?.declared;
+  const valor = (l: ClientLimits | null | undefined, k: keyof ClientLimits) => {
+    const v = l?.[k];
+    if (v == null) return '—';
+    return k === 'maxLoanAmount' || k === 'maxOutstanding' ? `$${v.toLocaleString('es-MX')}` : k === 'maxTerm' ? `${v} quincenas` : String(v);
+  };
+
+  return (
+    <>
+      <Field label="Unidad" required hint="La sucursal, o una distribuidora para darle su propia política (sólo más estricta).">
+        <Select value={unitId} onChange={(v) => { setUnitId(v); setCaptura(vacia()); setHecho(null); setError(null); }}
+          placeholder="Elige una unidad…"
+          options={[...unidades].sort((a, b) => a.name.localeCompare(b.name)).map((u) => ({ value: u.unitId, label: `${u.name} · ${u.code}` }))} />
+      </Field>
+
+      {unitId && (
+        <div className="bo-ruta" style={{ margin: '14px 0' }}>
+          <div className="bo-def-k">Lo que le aplica hoy</div>
+          <div className="bo-ruta-v">
+            {politica.loading ? 'Consultando…'
+              : !politica.data?.configured ? 'Sin política: sus distribuidoras colocan dentro de lo que permite el producto'
+                : `Viene de ${politica.data.inheritedFrom}${declarada ? ' (declara la suya)' : ''}`}
+          </div>
+          {efectiva && (
+            <table style={{ marginTop: 8, fontSize: 12.5, borderCollapse: 'collapse' }}>
+              <thead><tr><th style={{ textAlign: 'left', paddingRight: 16 }}></th><th style={{ textAlign: 'right', paddingRight: 16 }}>Nuevo</th><th style={{ textAlign: 'right' }}>Revolvente</th></tr></thead>
+              <tbody>
+                {LIMITES.map((l) => (
+                  <tr key={l.key}>
+                    <td style={{ paddingRight: 16 }}>{l.label}</td>
+                    <td style={{ textAlign: 'right', paddingRight: 16 }}>{valor(efectiva.nuevo, l.key)}</td>
+                    <td style={{ textAlign: 'right' }}>{valor(efectiva.revolvente, l.key)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {(['nuevo', 'revolvente'] as const).map((tipo) => (
+        <div key={tipo} style={{ marginTop: 10 }}>
+          <div className="bo-field-label" style={{ marginBottom: 6 }}>
+            Cliente {tipo} {tipo === 'revolvente' ? <Badge tone="ok">ya pagó un préstamo</Badge> : <Badge tone="muted">sin préstamo pagado</Badge>}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            {LIMITES.map((l) => (
+              <Field key={l.key} label={l.label} hint={l.hint}>
+                <NumberInput value={captura[tipo][l.key]} disabled={!unitId} suffix={l.suffix} placeholder={valor(efectiva?.[tipo], l.key)}
+                  onChange={(v) => setCaptura((c) => ({ ...c, [tipo]: { ...c[tipo], [l.key]: v } }))} />
+              </Field>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <p className="bo-page-sub" style={{ marginTop: 10 }}>
+        Lo que dejes vacío se hereda de la rama superior. Los créditos directos no la usan: su monto lo define el score.
+      </p>
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Button variant="primary" onClick={() => void guardar(false)} disabled={!unitId || guardando || invalido}>
+          {guardando ? 'Guardando…' : 'Guardar política'}
+        </Button>
+        <Button onClick={() => void guardar(true)} disabled={!unitId || guardando || !declarada}
+          title="Le quita su política propia; vuelve a heredar la de su rama superior">
+          Quitar política propia
+        </Button>
+        {hecho && <span style={{ color: 'var(--bo-ok)', fontSize: 12.5 }}>{hecho}</span>}
+      </div>
+      {invalido && <p style={{ color: 'var(--bo-bad)', fontSize: 13, marginTop: 8 }}>Los límites son números mayores que cero.</p>}
+      {politica.loading && !politica.data && <Spinner />}
       {error && <p style={{ color: 'var(--bo-bad)', fontSize: 13, marginTop: 12 }}>{error}</p>}
     </>
   );

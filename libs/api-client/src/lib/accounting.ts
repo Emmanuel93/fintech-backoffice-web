@@ -115,6 +115,11 @@ export interface Voucher {
   originalPeriod: string | null;
   /** La póliza que ésta reversa, si es una cancelación. */
   reversalRef: string | null;
+  /**
+   * The product the voucher belongs to: the loan's, the lot's, or the one its bank side moved for. `null` is the
+   * institution's own fact (its funding, its capital): it belongs to no product.
+   */
+  productType?: string | null;
 }
 
 export interface VoucherDetail extends Voucher {
@@ -188,10 +193,8 @@ export interface AccountingSummary {
   /** IVA trasladado del período. No es ingreso: es dinero del SAT que se cobra y se retiene. */
   ivaAccrued: number;
   /**
-   * Lo que debería acabar en un CFDI: interés + moratorios + comisiones + **IVA**.
-   *
-   * El IVA cuenta porque el total de una factura lo incluye. Compararlo sin él produce una
-   * diferencia igual al impuesto, que no es un faltante.
+   * What has to end up in a CFDI: what the month charged the clients — interest, moratorium, fees — **with IVA**
+   * (a CFDI's total includes it). The fiscal base, not the revenue recognized: see `billingBridge`.
    */
   billable: number;
   /** Total facturado del período, sin las canceladas. */
@@ -206,6 +209,24 @@ export interface AccountingSummary {
   /** Altas de préstamo asentadas en el período — cuántos créditos nacieron. */
   loansRegistered: number;
   byUnit: UnitAccounting[];
+  /** From recognized revenue (IFRS) to what was charged and invoiced; absent in older summaries. */
+  billingBridge?: BillingBridge | null;
+}
+
+/**
+ * Why the revenue the books recognize (IFRS 9) and what was charged to the clients (and invoiced) are not the same
+ * figure: charged = revenue + IVA + Stage 3 interest not recognized + fees charged and deferred − fees of earlier
+ * months recognized now + origination costs amortized (+ unexplained, zero when the bridge holds).
+ */
+export interface BillingBridge {
+  charged: number;
+  revenue: number;
+  iva: number;
+  stage3NotRecognized: number;
+  deferredFeesCharged: number;
+  deferredFeesRecognized: number;
+  originationCostsAmortized: number;
+  unexplained: number;
 }
 
 export interface TrialBalanceRow {
@@ -214,11 +235,112 @@ export interface TrialBalanceRow {
   accountType: AccountNature;
   totalDebit: number;
   totalCredit: number;
-  /** Cargos − abonos. Para las contra-activo y las de naturaleza acreedora sale negativo a propósito. */
+  /**
+   * Net movement of the period (debits − credits), not the account's balance: a month that collected more than it
+   * lent shows the portfolio negative here.
+   */
   balance: number;
+  /** What the account held when the period opened (debit balances positive). */
+  openingBalance: number;
+  /** What it holds at the close: opening + debits − credits. This is what reconciles with each subledger. */
+  closingBalance: number;
+}
+
+/** The institution's own facts in the trial balance by product: funding, capital, what belongs to no product. */
+export const INSTITUCION = 'INSTITUCION';
+
+/** A product's movement in the period: the row the product selector lists. */
+export interface ProductMovement {
+  /** `INSTITUCION` for what belongs to no product. */
+  productType: string;
+  productName: string;
+  vouchers: number;
+  loans: number;
+  totalDebit: number;
+  totalCredit: number;
+  accruedInterest: number;
+  moratoriumInterest: number;
+  fees: number;
+  provision: number;
+}
+
+/** One pair of accounts a concept moved: debit one, credit the other. */
+export interface ProductSchemePair {
+  debitAccount: string;
+  debitName: string;
+  creditAccount: string;
+  creditName: string;
+  entries: number;
+  amount: number;
+  description: string | null;
+}
+
+/** A concept of the product (one business fact) and the pairs of accounts it moved. */
+export interface ProductSchemeConcept {
+  triggerEvent: string;
+  concept: string | null;
+  vouchers: number;
+  amount: number;
+  pairs: ProductSchemePair[];
+}
+
+/** A product's accounting scheme as the ledger booked it: each concept and the accounts it moves. */
+export interface ProductScheme {
+  productType: string;
+  productName: string;
+  from: string | null;
+  to: string | null;
+  concepts: ProductSchemeConcept[];
 }
 
 export type PeriodStatus = 'OPEN' | 'CLOSED';
+
+/** One check of the month-end close. A failed blocking one keeps the month open; a non-blocking one only reports. */
+export interface CloseCheck {
+  code: string;
+  title: string;
+  ok: boolean;
+  blocking: boolean;
+  /** How many accounts, vouchers or entries are off (or reported). */
+  items: number | null;
+  /** How much is off, in pesos, when it is a matter of amounts. */
+  amount: number | null;
+  /** What was compared, in words, with the figures. */
+  detail: string;
+  /** Measured on the month's last day, which has not come: not in order yet, and not a difference. */
+  pending?: boolean;
+}
+
+/**
+ * The reconciliation of a month: the one its close ran (closed month) or a dry run (open month: nothing booked, the
+ * month's deferred fees reported as what the close will book). The close answers with the same shape: 200 when it
+ * closed, 409 when it does not reconcile and the month stays open.
+ */
+export interface PeriodReconciliation {
+  period: string;
+  status: PeriodStatus;
+  /** IN_PROGRESS: the month has not ended; what can be checked today is in order and the rest waits for its last day. */
+  outcome: 'RECONCILED' | 'DIFFERENCES' | 'IN_PROGRESS';
+  message: string;
+  runAt: string;
+  closedAt: string | null;
+  preview: boolean;
+  checks: CloseCheck[];
+}
+
+/**
+ * What a service says of itself: the checks it ran on its own data, in the close's contract. In order when every check
+ * that must hold holds; the informative ones point at something to review. UNREACHABLE: the service did not answer,
+ * which is never «in order».
+ */
+export interface SelfCheckReport {
+  service: string;
+  scope: string;
+  outcome: 'IN_ORDER' | 'DIFFERENCES' | 'UNREACHABLE';
+  runAt?: string;
+  error?: string;
+  checks: CloseCheck[];
+}
 
 export interface AccountingPeriod {
   period: string;
@@ -465,11 +587,28 @@ export const accountingApi = {
     return mockLoanLedger(creditAccountId);
   },
 
-  async trialBalance(period: string, unitCode?: string): Promise<TrialBalanceRow[]> {
+  /** The trial balance of the institution, of a branch, or of a product (`INSTITUCION`: what is no product's). */
+  async trialBalance(period: string, unitCode?: string, productType?: string): Promise<TrialBalanceRow[]> {
     if (!isMock()) {
-      return request<TrialBalanceRow[]>('/accounting/trial-balance', { query: { period, unitCode } });
+      return request<TrialBalanceRow[]>('/accounting/trial-balance',
+        { query: { period, unitCode, productTypes: productType } });
     }
-    return mockTrialBalance(period, unitCode);
+    return mockTrialBalance(period, unitCode, productType);
+  },
+
+  /** Each product's movement in the period, the institution's own facts apart. */
+  async products(period: string, unitCode?: string): Promise<ProductMovement[]> {
+    if (!isMock()) return request<ProductMovement[]>('/accounting/products', { query: { period, unitCode } });
+    return mockProducts(period, unitCode);
+  },
+
+  /** A product's accounting scheme between two periods (both inclusive; none = its whole history). */
+  async productScheme(productType: string, from?: string, to?: string): Promise<ProductScheme> {
+    if (!isMock()) {
+      return request<ProductScheme>(`/accounting/products/${encodeURIComponent(productType)}/scheme`,
+        { query: { from, to } });
+    }
+    return mockProductScheme(productType, from, to);
   },
 
   async invoices(query: InvoicesQuery = {}): Promise<InvoicesPage> {
@@ -491,8 +630,20 @@ export const accountingApi = {
    * abierto marcado como extemporáneo. Es decir «estos números ya se publicaron», no levantar un
    * muro que haga desaparecer hechos.
    */
-  async closePeriod(period: string): Promise<{ period: string; status: PeriodStatus }> {
+  async closePeriod(period: string): Promise<PeriodReconciliation> {
     return request(`/accounting/periods/${period}/close`, { method: 'POST' });
+  },
+
+  /** What commissions, treasury, the portfolio and the statements say of themselves. */
+  async selfChecks(): Promise<SelfCheckReport[]> {
+    if (!isMock()) return request<SelfCheckReport[]>('/accounting/self-checks');
+    return mockSelfChecks();
+  },
+
+  /** The month's reconciliation: the close's, or a dry run while it is open. */
+  async reconciliation(period: string): Promise<PeriodReconciliation> {
+    if (!isMock()) return request<PeriodReconciliation>(`/accounting/periods/${period}/reconciliation`);
+    return mockReconciliation(period);
   },
 
   async reopenPeriod(period: string): Promise<{ period: string; status: PeriodStatus }> {
@@ -551,8 +702,13 @@ export interface BackfillResult {
 
 export const LEDGER_ACCOUNTS: LedgerAccount[] = [
   { code: '1101', name: 'Bancos / SPEI', type: 'ASSET' },
+  // SPEI money between the portfolio's date and the bank's: a payment received at 19:00 waits here for the bank's
+  // credit of the next business day.
+  { code: '1103', name: 'Remesas en camino: cobranza SPEI por acreditar', type: 'ASSET' },
   { code: '1201', name: 'Cartera de crédito vigente', type: 'ASSET' },
   { code: '1203', name: 'Intereses y comisiones por cobrar', type: 'ASSET' },
+  // Transaction costs of origination (the promoter's commission), amortized against interest revenue (IFRS 9 B5.4.8).
+  { code: '1205', name: 'Costos de originación por amortizar', type: 'ASSET' },
   // Cartera castigada y su control van en cuentas de ORDEN, no en el activo: el quebranto da de
   // baja el activo del balance y lo castigado se sigue fuera de él (IFRS 9 §5.4.4). Aquí estaba
   // declarada como ASSET mientras el catálogo real la tiene como ORDER, así que en cuanto el mock
@@ -562,14 +718,28 @@ export const LEDGER_ACCOUNTS: LedgerAccount[] = [
   { code: '7301', name: 'Control de cartera castigada', type: 'ORDER' },
   { code: '1290', name: 'Estimación preventiva para riesgos crediticios', type: 'CONTRA_ASSET' },
   { code: '2101', name: 'Fondos de clientes por disponer', type: 'LIABILITY' },
+  // What a received credit left over after paying what was owed: it is the payer's, applied to the next installment.
+  { code: '2102', name: 'Saldos a favor de clientes', type: 'LIABILITY' },
+  // A disposition waits here until the bank reports its SPEI order out on the operation date.
+  { code: '2103', name: 'Acreedores por liquidación de operaciones: SPEI por liquidar', type: 'LIABILITY' },
   { code: '2110', name: 'IVA trasladado por pagar', type: 'LIABILITY' },
+  // Funding: the lines drawn (IFRS 9 liability at amortised cost), their interest and their transaction costs.
+  { code: '2201', name: 'Préstamos bancarios y de otros organismos', type: 'LIABILITY' },
+  { code: '2202', name: 'Intereses devengados por pagar de préstamos', type: 'LIABILITY' },
+  { code: '2209', name: 'Costos de transacción por amortizar de préstamos', type: 'LIABILITY' },
+  { code: '3101', name: 'Capital social pagado', type: 'EQUITY' },
+  // The year-end close (period 13) takes the year's result here.
+  { code: '3201', name: 'Resultado de ejercicios anteriores', type: 'EQUITY' },
   { code: '4101', name: 'Ingresos por intereses', type: 'INCOME' },
   { code: '4102', name: 'Ingresos por intereses moratorios', type: 'INCOME' },
   { code: '4103', name: 'Ingresos por comisiones', type: 'INCOME' },
   { code: '4104', name: 'Recuperación de cartera castigada', type: 'INCOME' },
+  // The opening fee and the origination costs inside the effective interest rate: interest revenue, not fee income.
+  { code: '4106', name: 'Ingresos por intereses: comisiones y costos de originación (tasa efectiva)', type: 'INCOME' },
   { code: '5101', name: 'Gasto por estimación preventiva', type: 'EXPENSE' },
   { code: '5102', name: 'Gasto por quebranto / quita', type: 'EXPENSE' },
   { code: '5103', name: 'Gasto por condonación', type: 'EXPENSE' },
+  { code: '5201', name: 'Gastos por intereses de préstamos bancarios y de otros organismos', type: 'EXPENSE' },
   { code: '7101', name: 'Líneas de crédito autorizadas', type: 'ORDER' },
   { code: '7201', name: 'Líneas autorizadas por disponer', type: 'ORDER' },
 ];
@@ -875,6 +1045,7 @@ function buildVouchers(): VoucherDetail[] {
       contractNumber: loan.contract,
       obligorPartyId: loan.partyId,
       obligorName: loan.party,
+      productType: loan.product,
       totalDebit,
       totalCredit,
       status: spec.status ?? 'POSTED',
@@ -1208,21 +1379,121 @@ function mockLoans(q: LoanMovementsQuery): LoanMovementsPage {
   };
 }
 
-function mockTrialBalance(period: string, unitCode?: string): TrialBalanceRow[] {
-  const vs = periodVouchers(period, unitCode);
+/** A voucher of the product; `INSTITUCION` takes what belongs to no product. */
+function ofProduct(v: Voucher, productType?: string): boolean {
+  if (!productType) return true;
+  if (productType === INSTITUCION) return v.productType == null;
+  return v.productType === productType;
+}
+
+const PRODUCT_NAMES: Record<string, string> = {
+  PERSONAL_LOAN: 'Préstamo personal',
+  PAYROLL_LOAN: 'Crédito de nómina',
+  DISTRIBUTOR_LINE: 'Línea de distribuidora',
+  REVOLVING_LINE: 'Línea revolvente',
+  [INSTITUCION]: 'Institución',
+};
+
+function mockProducts(period: string, unitCode?: string): ProductMovement[] {
+  const byProduct = new Map<string, VoucherDetail[]>();
+  periodVouchers(period, unitCode).forEach((v) => {
+    const key = v.productType ?? INSTITUCION;
+    byProduct.set(key, [...(byProduct.get(key) ?? []), v]);
+  });
+  return [...byProduct.entries()].map(([productType, vs]) => {
+    let debit = 0;
+    let credit = 0;
+    vs.forEach((v) => v.lines.forEach((l) => {
+      if (isOrder(l.accountCode)) return;
+      debit += l.debit;
+      credit += l.credit;
+    }));
+    return {
+      productType,
+      productName: PRODUCT_NAMES[productType] ?? productType,
+      vouchers: vs.length,
+      loans: new Set(vs.map((v) => v.creditAccountId).filter((id) => id != null)).size,
+      totalDebit: round2(debit),
+      totalCredit: round2(credit),
+      accruedInterest: creditMovement(vs, '4101'),
+      moratoriumInterest: creditMovement(vs, '4102'),
+      fees: creditMovement(vs, '4103'),
+      provision: creditMovement(vs, '1290'),
+    };
+  }).sort((a, b) => b.totalDebit - a.totalDebit);
+}
+
+/**
+ * A product's scheme from the mock vouchers. The mock keeps one-sided lines, not entries, so each voucher's debits are
+ * paired with its credits in order: the pairs add up to the voucher, as the real entries do.
+ */
+function mockProductScheme(productType: string, from?: string, to?: string): ProductScheme {
+  const concepts = new Map<string, { concept: ProductSchemeConcept; pairs: Map<string, ProductSchemePair> }>();
+  MOCK_VOUCHERS
+    .filter((v) => v.status === 'POSTED' && ofProduct(v, productType))
+    .filter((v) => (!from || v.period >= from) && (!to || v.period <= to))
+    .forEach((v) => {
+      const key = v.triggerEvent;
+      const entry = concepts.get(key) ?? {
+        concept: { triggerEvent: v.triggerEvent, concept: v.concept, vouchers: 0, amount: 0, pairs: [] },
+        pairs: new Map<string, ProductSchemePair>(),
+      };
+      entry.concept.vouchers += 1;
+      entry.concept.amount = round2(entry.concept.amount + v.totalDebit);
+      const debits = v.lines.filter((l) => l.debit > 0).map((l) => ({ code: l.accountCode, left: l.debit }));
+      const credits = v.lines.filter((l) => l.credit > 0).map((l) => ({ code: l.accountCode, left: l.credit }));
+      let d = 0;
+      let c = 0;
+      while (d < debits.length && c < credits.length) {
+        const amount = Math.min(debits[d].left, credits[c].left);
+        const pk = `${debits[d].code}|${credits[c].code}`;
+        const pair = entry.pairs.get(pk) ?? {
+          debitAccount: debits[d].code, debitName: ACCOUNT_BY_CODE.get(debits[d].code)?.name ?? debits[d].code,
+          creditAccount: credits[c].code, creditName: ACCOUNT_BY_CODE.get(credits[c].code)?.name ?? credits[c].code,
+          entries: 0, amount: 0, description: null,
+        };
+        pair.entries += 1;
+        pair.amount = round2(pair.amount + amount);
+        entry.pairs.set(pk, pair);
+        debits[d].left = round2(debits[d].left - amount);
+        credits[c].left = round2(credits[c].left - amount);
+        if (debits[d].left <= 0) d++;
+        if (credits[c].left <= 0) c++;
+      }
+      concepts.set(key, entry);
+    });
+  return {
+    productType,
+    productName: PRODUCT_NAMES[productType] ?? productType,
+    from: from ?? null,
+    to: to ?? null,
+    concepts: [...concepts.values()]
+      .map(({ concept, pairs }) => ({ ...concept, pairs: [...pairs.values()] }))
+      .sort((a, b) => b.amount - a.amount),
+  };
+}
+
+function mockTrialBalance(period: string, unitCode?: string, productType?: string): TrialBalanceRow[] {
+  const vs = periodVouchers(period, unitCode).filter((v) => ofProduct(v, productType));
   const debits = new Map<string, number>();
   const credits = new Map<string, number>();
+  const opening = new Map<string, number>();
 
   vs.forEach((v) => v.lines.forEach((l) => {
     debits.set(l.accountCode, (debits.get(l.accountCode) ?? 0) + l.debit);
     credits.set(l.accountCode, (credits.get(l.accountCode) ?? 0) + l.credit);
   }));
+  // What the earlier periods left in each account is this period's opening balance.
+  MOCK_VOUCHERS.filter((v) => v.period < period && inScope(v, unitCode) && ofProduct(v, productType)).forEach((v) => v.lines.forEach((l) => {
+    opening.set(l.accountCode, (opening.get(l.accountCode) ?? 0) + l.debit - l.credit);
+  }));
 
   return LEDGER_ACCOUNTS
-    .filter((a) => (debits.get(a.code) ?? 0) !== 0 || (credits.get(a.code) ?? 0) !== 0)
+    .filter((a) => (debits.get(a.code) ?? 0) !== 0 || (credits.get(a.code) ?? 0) !== 0 || (opening.get(a.code) ?? 0) !== 0)
     .map((a) => {
       const d = round2(debits.get(a.code) ?? 0);
       const c = round2(credits.get(a.code) ?? 0);
+      const o = round2(opening.get(a.code) ?? 0);
       return {
         accountCode: a.code,
         accountName: a.name,
@@ -1230,6 +1501,8 @@ function mockTrialBalance(period: string, unitCode?: string): TrialBalanceRow[] 
         totalDebit: d,
         totalCredit: c,
         balance: round2(d - c),
+        openingBalance: o,
+        closingBalance: round2(o + d - c),
       };
     });
 }
@@ -1298,5 +1571,63 @@ function mockInvoices(q: InvoicesQuery): InvoicesPage {
     size,
     totalElements: all.length,
     totalPages: Math.max(1, Math.ceil(all.length / size)),
+  };
+}
+
+/** A month of the mock that reconciles, with the checks the real close runs. */
+function mockSelfChecks(): SelfCheckReport[] {
+  const check = (code: string, title: string, detail: string, blocking = true, ok = true,
+                 items = 0, amount = 0): CloseCheck => ({ code, title, ok, blocking, items, amount, detail });
+  const at = '2026-11-04T18:00:00Z';
+  return [
+    { service: 'commission-service', scope: '*', outcome: 'IN_ORDER', runAt: at, checks: [
+      check('LOTES_SUMAN_SUS_REGISTROS', 'Cada lote suma sus registros de comisión', '5 lotes: cada uno suma sus registros'),
+      check('NETO_DE_CADA_LOTE', 'Neto de cada lote: comisión + IVA − retenciones', '5 lotes con su neto en orden'),
+      check('ARRASTRE_EXPLICADO', 'Lo que la corrida dejó sin lote tiene razón', 'Corrida de 202610: 4 grupos bajo el mínimo'),
+      check('LOTES_SIN_DESENLACE', 'Lotes enviados hace más de dos días sin desenlace',
+        '1 lote enviado sin liquidar ni rechazar: revisar su orden en tesorería', false, false, 1, 541.06),
+    ] },
+    { service: 'banking-service', scope: '*', outcome: 'IN_ORDER', runAt: at, checks: [
+      check('FONDEO_CUADRA', 'Cada fuente de fondeo es la suma de sus movimientos', '2 fuentes en orden'),
+      check('PAGOS_EN_CAJA_Y_TRAZA', 'Cada orden liquidada está en el libro de caja y en su traza', '60 órdenes en orden'),
+      check('CAJA_NO_NEGATIVA', 'La caja nunca cierra un día en negativo', '185 días, ninguno en negativo'),
+    ] },
+    { service: 'credit-portfolio-service', scope: '*', outcome: 'IN_ORDER', runAt: at, checks: [
+      check('SALDO_IGUAL_A_SU_LIBRO', 'La deuda de cada cuenta es la suma de sus movimientos', '40 cuentas en orden'),
+      check('FOTO_SIN_BRECHA', 'Cada foto del día coincidió con el libro de la cuenta', '5,298 fotos sin brecha'),
+    ] },
+    { service: 'statement-service', scope: '*', outcome: 'IN_ORDER', runAt: at, checks: [
+      check('UN_ESTADO_POR_CUENTA_CERRADA', 'Cada corte sellado tiene un estado por cuenta que cerró', '146 corridas en orden'),
+      check('DOCUMENTO_DE_CADA_ESTADO', 'Cada estado generado tiene su documento íntegro', '292 estados con su PDF'),
+    ] },
+  ];
+}
+
+function mockReconciliation(period: string): PeriodReconciliation {
+  const closed = MOCK_PERIODS.find((p) => p.period === period)?.status === 'CLOSED';
+  const check = (code: string, title: string, detail: string, blocking = true, ok = true): CloseCheck =>
+    ({ code, title, ok, blocking, items: 0, amount: 0, detail });
+  const checks = [
+    check('CARTERA_CERRADA', 'Cartera cerró el último día del mes', 'cartera cerró el último día con todas sus cuentas'),
+    check('RESERVA_MEDIDA', 'Reserva IFRS 9 medida a la fecha del cierre', '72 créditos con saldo, todos con su reserva medida'),
+    check('POLIZAS_CUADRAN', 'Pólizas del mes cuadradas', 'todas las pólizas cuadradas'),
+    check('CAPITAL_1201', 'Capital: cartera contra el mayor 1201', '72 créditos; cartera = mayor'),
+    check('POR_COBRAR_1203', 'Intereses, comisiones e IVA por cobrar: cartera contra el mayor 1203', '72 créditos; cartera = mayor'),
+    check('RESERVA_1290', 'Estimación preventiva: reservas medidas contra el mayor 1290', 'reservas = mayor'),
+    check('DIFERIDAS_2150', 'Comisiones de apertura por devengar: calendarios contra el mayor 2150', 'calendarios = mayor'),
+    check('COSTOS_1205', 'Costos de originación por amortizar: calendarios contra el mayor 1205', 'calendarios = mayor'),
+    check('DEVENGO_COMISIONES', 'Devengo del mes de comisiones y costos de originación (tasa efectiva)',
+      closed ? 'todas las comisiones devengadas hasta el mes' : 'al cerrar se devengan las del mes', closed),
+    check('CUENTAS_DE_ORDEN', 'Cuentas de orden en pares', 'cuadran entre sí'),
+    check('SIN_INCORPORACIONES', 'Sin incorporaciones contra capital (3901)', 'ningún crédito incorporado'),
+    check('CENTAVOS', 'Asientos en centavos', 'todos los asientos del mes en centavos'),
+    check('EXTEMPORANEAS', 'Pólizas extemporáneas recibidas en el mes', 'ninguna', false),
+    check('BANCOS_1101', 'Bancos 1101 contra el estado de cuenta bancario',
+      'la conciliación bancaria espera el registro del fondeo y el estado de cuenta de STP', false, false),
+  ];
+  return {
+    period, status: closed ? 'CLOSED' : 'OPEN', outcome: 'RECONCILED',
+    message: `El período ${period} concilia: ${checks.length} comprobaciones en orden.`,
+    runAt: new Date().toISOString(), closedAt: closed ? new Date().toISOString() : null, preview: !closed, checks,
   };
 }

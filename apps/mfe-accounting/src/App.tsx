@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  accountingApi, isMock,
+  accountingApi, isMock, INSTITUCION,
   type AccountingPeriod, type Invoice, type InvoicesQuery, type InvoiceStatus,
   type LoanMovement,
   type TrialBalanceRow, type UnitAccounting, type Voucher,
@@ -13,10 +13,12 @@ import {
 } from '@bo/design-system';
 import {
   ESTADO_FACTURA, ESTADO_PERIODO, NATURALEZA, TIPO_POLIZA,
-  folioCompleto, hechoLabel, periodoLabel, plural, responsableLabel, saldoPresentado,
+  folioCompleto, hechoLabel, periodoLabel, plural, responsableLabel,
   sucursalLabel, tonoFactura, tonoTipo,
 } from './lenguaje';
 import { Reconciliacion } from './Reconciliacion';
+import { CierreConciliado } from './CierreConciliado';
+import { Autoverificacion } from './Autoverificacion';
 import { PolizaModal } from './PolizaModal';
 import { FacturaModal } from './FacturaModal';
 import { PrestamoModal } from './PrestamoModal';
@@ -24,8 +26,8 @@ import { Tesoreria } from './Tesoreria';
 
 ensureThemeStyles();
 
-type Vista = 'resumen' | 'polizas' | 'facturas' | 'balanza' | 'tesoreria';
-const VISTAS: readonly Vista[] = ['resumen', 'polizas', 'facturas', 'balanza', 'tesoreria'];
+type Vista = 'resumen' | 'polizas' | 'facturas' | 'balanza' | 'tesoreria' | 'autoverificacion';
+const VISTAS: readonly Vista[] = ['resumen', 'polizas', 'facturas', 'balanza', 'tesoreria', 'autoverificacion'];
 
 /** Lo que el usuario tiene abierto encima de la tabla. Uno a la vez, y se apilan al navegar. */
 type Detalle =
@@ -57,6 +59,8 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
   const [operando, setOperando] = useState<string | null>(null);
   const [reconciliando, setReconciliando] = useState(false);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'bad'; texto: string } | null>(null);
+  // Closing or reopening changes what the close's reconciliation says: the card reloads after each.
+  const [cierres, setCierres] = useState(0);
 
   // Cerrar y reabrir mueven el corte contable: el BFF los exige con `accounting.close`, que un
   // auditor no tiene a propósito —auditar no puede implicar poder mover el corte de lo que se
@@ -109,6 +113,7 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
       setAviso({ tono: 'bad', texto: e instanceof Error ? e.message : 'No se pudo completar' });
     } finally {
       setOperando(null);
+      setCierres((n) => n + 1);
     }
   }, [periodos]);
 
@@ -168,10 +173,10 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
               <Button
                 variant="primary"
                 disabled={operando != null}
-                title="Publica los números del mes. Lo que llegue después se asienta en el primer período abierto, marcado como extemporáneo."
+                title="Concilia el mes y, si concilia, publica sus números. Lo que llegue después se asienta en el primer período abierto, marcado como extemporáneo."
                 onClick={() => void operar('cerrar',
                   () => accountingApi.closePeriod(periodo),
-                  () => `${periodoLabel(periodo)} queda cerrado.`)}
+                  () => `${periodoLabel(periodo)} concilió y queda cerrado. La conciliación está en la pestaña Balanza.`)}
               >
                 {operando === 'cerrar' ? 'Cerrando…' : 'Cerrar período'}
               </Button>
@@ -209,6 +214,7 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
           { value: 'polizas', label: 'Pólizas', icon: '📒' },
           { value: 'facturas', label: 'Facturas', icon: '🧾' },
           { value: 'balanza', label: 'Balanza', icon: '⚖️' },
+          { value: 'autoverificacion', label: 'Autoverificación', icon: '🩺' },
         ]}
       />
 
@@ -236,7 +242,8 @@ export function App({ vista: vistaRuta }: { vista?: string } = {}) {
           {vista === 'facturas' && (
             <Facturas periodo={periodo} onAbrir={abrirFactura} />
           )}
-          {vista === 'balanza' && <Balanza periodo={periodo} />}
+          {vista === 'balanza' && <Balanza periodo={periodo} cierres={cierres} />}
+          {vista === 'autoverificacion' && <Autoverificacion />}
         </>
       )}
 
@@ -426,9 +433,13 @@ function Resumen({ periodo }: { periodo: string }) {
           icon="📈"
         />
         <KpiCard
-          label="Comisiones"
-          value={money(s.fees)}
-          delta="apertura, administración y prepago"
+          // What the month charged in fees. The opening fee is charged (and invoiced) at the disbursement but is
+          // revenue over the loan's life (4106, effective rate): showing only 4103 read «$0» in a month full of loans.
+          label="Comisiones cobradas"
+          value={money(s.fees + (s.billingBridge?.deferredFeesCharged ?? 0))}
+          delta={s.billingBridge && s.billingBridge.deferredFeesRecognized > 0
+            ? `${money(s.billingBridge.deferredFeesRecognized)} de apertura reconocidas este mes como interés (tasa efectiva)`
+            : 'apertura, administración y prepago'}
         />
         <KpiCard
           // Movimiento neto: se constituye reserva y se consume al quebrantar. Negativo no es un
@@ -458,54 +469,54 @@ function Resumen({ periodo }: { periodo: string }) {
         />
       </div>
 
-      {/* La conciliación del período, desglosada. Son dos preguntas distintas y las dos importan:
-          el cuadre dice que la partida doble está bien; esto dice que lo devengado acabó cobrable.
-          Un mes puede cuadrar perfecto y no haber facturado nada. */}
+      {/* The period's billing reconciliation. What has to be invoiced is what the month charged the clients (the
+          fiscal base); the revenue the books recognize (IFRS) differs from it by design, and the bridge names each
+          difference: comparing revenue against the CFDIs read «facturado de más» in every closed month while the
+          invoices matched the charges to the centavo. */}
       <div style={{ marginTop: 16 }}>
         <CardTitled title={`Conciliación de facturación · ${periodoLabel(periodo)}`}>
-          <div className="bo-card-pad">
+          <div className="bo-card-pad" style={{ display: 'grid', gap: 18 }}>
             <div className="bo-totales-grid" style={{ maxWidth: 680 }}>
               <div className="bo-totales-fila">
-                <span>Interés devengado</span><b>{money(s.accruedInterest, true)}</b>
-              </div>
-              {s.moratoriumInterest > 0 && (
-                <div className="bo-totales-fila">
-                  <span>Interés moratorio</span><b>{money(s.moratoriumInterest, true)}</b>
-                </div>
-              )}
-              <div className="bo-totales-fila">
-                <span>Comisiones</span><b>{money(s.fees, true)}</b>
-              </div>
-              <div className="bo-totales-fila">
-                <span>IVA trasladado<span className="bo-sub"> · no es ingreso, es del SAT</span></span>
-                <b>{money(s.ivaAccrued, true)}</b>
-              </div>
-              <div className="bo-totales-fila bo-totales-suma">
-                <span><b>Facturable del período</b></span><b>{money(s.billable, true)}</b>
+                <span><b>Cobrado al cliente en el mes</b><span className="bo-sub"> · intereses, moratorios, comisiones e IVA: lo que se factura</span></span>
+                <b>{money(s.billable, true)}</b>
               </div>
               <div className="bo-totales-fila">
                 <span>Facturado<span className="bo-sub"> · {plural(s.invoiceCount, 'CFDI', 'CFDI')}</span></span>
                 <b>{money(s.invoiced, true)}</b>
               </div>
-              <div className="bo-totales-fila">
+              <div className="bo-totales-fila bo-totales-suma">
                 <span style={{ color: s.billingReconciled ? 'var(--bo-ok)' : 'var(--bo-bad)' }}>
                   {s.billingReconciled
-                    ? '✓ Todo lo devengado está facturado'
-                    : s.billingDifference > 0
-                      ? 'Devengado sin facturar'
-                      : 'Facturado de más'}
+                    ? '✓ Todo lo cobrado está facturado'
+                    : s.billingDifference > 0 ? 'Cobrado sin facturar' : 'Facturado de más'}
                 </span>
-                {!s.billingReconciled && (
-                  <b style={{ color: 'var(--bo-bad)' }}>{money(s.billingDifference, true)}</b>
-                )}
+                <b style={{ color: s.billingReconciled ? undefined : 'var(--bo-bad)' }}>
+                  {money(s.billingReconciled ? 0 : s.billingDifference, true)}
+                </b>
               </div>
             </div>
-            {!s.billingReconciled && s.billingDifference > 0 && (
-              <p className="bo-sub" style={{ marginTop: 12 }}>
-                Lo devengado se acumula solo con cada cargo; convertirlo en CFDI exige correr la
-                facturación del período. Una diferencia positiva casi siempre significa que esa
-                corrida no se ha hecho, no que falte un asiento.
-              </p>
+
+            {s.billingBridge && (
+              <div>
+                <div className="bo-sub" style={{ fontWeight: 650, marginBottom: 6 }}>
+                  Del ingreso contable (IFRS 9) a lo cobrado: por qué no son la misma cifra
+                </div>
+                <div className="bo-totales-grid" style={{ maxWidth: 680 }}>
+                  <Puente etiqueta="Ingreso reconocido" detalle="intereses, moratorios y comisiones (4101, 4102, 4103, 4106)" valor={s.billingBridge.revenue} />
+                  <Puente etiqueta="+ IVA trasladado" detalle="no es ingreso: es del SAT (2110)" valor={s.billingBridge.iva} />
+                  <Puente etiqueta="+ Interés de etapa 3 cobrado y no reconocido" detalle="se factura, pero el ingreso es sólo la parte del neto (va a la estimación)" valor={s.billingBridge.stage3NotRecognized} />
+                  <Puente etiqueta="+ Comisiones de apertura cobradas este mes" detalle="se facturan al disponer; son ingreso en la vida del crédito (2150)" valor={s.billingBridge.deferredFeesCharged} />
+                  <Puente etiqueta="− Comisiones de meses anteriores reconocidas este mes" detalle="ingreso de hoy, facturado cuando se cobró (2150 → 4106)" valor={-s.billingBridge.deferredFeesRecognized} />
+                  <Puente etiqueta="+ Costos de originación amortizados" detalle="bajan el ingreso; no se facturan (1205)" valor={s.billingBridge.originationCostsAmortized} />
+                  {Math.abs(s.billingBridge.unexplained) >= 0.01 && (
+                    <Puente etiqueta="Sin explicar" detalle="lo que ninguna partida explica: revisar" valor={s.billingBridge.unexplained} malo />
+                  )}
+                  <div className="bo-totales-fila bo-totales-suma">
+                    <span><b>= Cobrado al cliente en el mes</b></span><b>{money(s.billingBridge.charged, true)}</b>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </CardTitled>
@@ -1484,51 +1495,71 @@ function Facturas({ periodo, onAbrir }: {
  * autorizada y se cancelan entre sí. Sumadas a la balanza patrimonial inflan el activo con dinero
  * que nunca salió, y el total deja de ser el total de nada.
  */
-function Balanza({ periodo }: { periodo: string }) {
+function Puente({ etiqueta, detalle, valor, malo }: { etiqueta: string; detalle: string; valor: number; malo?: boolean }) {
+  if (Math.abs(valor) < 0.005 && !malo) return null;
+  return (
+    <div className="bo-totales-fila">
+      <span>{etiqueta}<span className="bo-sub"> · {detalle}</span></span>
+      <b style={{ color: malo ? 'var(--bo-bad)' : undefined }}>{money(valor, true)}</b>
+    </div>
+  );
+}
+
+function Balanza({ periodo: mes, cierres }: { periodo: string; cierres: number }) {
   const [unidad, setUnidad] = useState('');
-  const unidades = useAsync(() => accountingApi.units(periodo), [periodo]);
+  const [producto, setProducto] = useState('');
+  // December can also be read with the year-end close: period 13, where the year's result goes to 3201.
+  const diciembre = mes.endsWith('12');
+  const [delEjercicio, setDelEjercicio] = useState(false);
+  useEffect(() => { setDelEjercicio(false); }, [mes]);
+  const periodo = diciembre && delEjercicio ? `${mes.slice(0, 4)}13` : mes;
+  const unidades = useAsync(() => accountingApi.units(mes), [mes]);
+  const productos = useAsync(() => accountingApi.products(mes), [mes]);
   const state = useAsync(
-    () => accountingApi.trialBalance(periodo, unidad || undefined),
-    [periodo, unidad],
+    () => accountingApi.trialBalance(periodo, unidad || undefined, producto || undefined),
+    [periodo, unidad, producto],
   );
 
   const rows = state.data ?? [];
   const patrimoniales = rows.filter((r) => r.accountType !== 'ORDER');
   const orden = rows.filter((r) => r.accountType === 'ORDER');
-
-  const suma = (rs: TrialBalanceRow[]) => ({
-    debit: rs.reduce((s, r) => s + r.totalDebit, 0),
-    credit: rs.reduce((s, r) => s + r.totalCredit, 0),
-  });
-  const totalPat = suma(patrimoniales);
-  const cuadra = Math.abs(totalPat.debit - totalPat.credit) < 0.01;
-
-  const columns: Array<Column<TrialBalanceRow>> = [
-    {
-      key: 'cuenta',
-      header: 'Cuenta',
-      render: (r) => (
-        <div>
-          <b className="bo-mono-sm">{r.accountCode}</b> {r.accountName}
-          <div className="bo-sub">{NATURALEZA[r.accountType]}</div>
-        </div>
-      ),
-    },
-    { key: 'cargos', header: 'Cargos', align: 'right', render: (r) => money(r.totalDebit, true) },
-    { key: 'abonos', header: 'Abonos', align: 'right', render: (r) => money(r.totalCredit, true) },
-    {
-      key: 'saldo',
-      header: 'Saldo',
-      align: 'right',
-      // Presentado con la naturaleza de la cuenta: un pasivo con saldo sano no se muestra negativo.
-      render: (r) => <b>{money(saldoPresentado(r.balance, r.accountType), true)}</b>,
-    },
+  const tP = sumas(patrimoniales);
+  const tO = sumas(orden);
+  const cuadra = tP.cuadra;
+  // The equation reads the institution's balance sheet: a branch or a product is a part of it, not a balance sheet.
+  const institucion = !unidad && !producto;
+  const opcionesDeProducto = [
+    { value: '', label: 'Todos los productos' },
+    ...(productos.data ?? [])
+      .filter((p) => p.productType !== INSTITUCION)
+      .map((p) => ({ value: p.productType, label: p.productName })),
+    { value: INSTITUCION, label: 'Institución (sin producto)' },
   ];
+  // A product chosen in another month stays chosen even when this month did not move it.
+  if (producto && !opcionesDeProducto.some((o) => o.value === producto)) {
+    opcionesDeProducto.push({ value: producto, label: producto });
+  }
 
   return (
     <>
+      <div style={{ marginBottom: 16 }}>
+        <CierreConciliado periodo={mes} version={cierres} />
+      </div>
       <Card>
         <div className="bo-card-pad" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          {diciembre && (
+            <Field label="Balanza">
+              <Select
+                value={delEjercicio ? '13' : '12'}
+                onChange={(v) => setDelEjercicio(v === '13')}
+                ariaLabel="Balanza de diciembre o de cierre del ejercicio"
+                options={[
+                  { value: '12', label: `Diciembre ${mes.slice(0, 4)}` },
+                  { value: '13', label: 'Cierre del ejercicio (periodo 13)' },
+                ]}
+              />
+            </Field>
+          )}
           <Field label="Sucursal">
             <Select
               value={unidad}
@@ -1542,28 +1573,38 @@ function Balanza({ periodo }: { periodo: string }) {
               ]}
             />
           </Field>
+          <Field label="Producto">
+            <Select
+              value={producto}
+              onChange={setProducto}
+              ariaLabel="Producto de la balanza"
+              options={opcionesDeProducto}
+            />
+          </Field>
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-            <div className="bo-sub">Cargos y abonos, {periodoLabel(periodo)}</div>
+            <div className="bo-sub">Saldos al cierre de {periodoLabel(periodo)}: deudores · acreedores</div>
             <div style={{ fontSize: 20, fontWeight: 750, fontVariantNumeric: 'tabular-nums' }}>
-              {money(totalPat.debit, true)} · {money(totalPat.credit, true)}
+              {money(tP.finalDeudor, true)} · {money(tP.finalAcreedor, true)}
             </div>
-            <Badge tone={cuadra ? 'ok' : 'bad'}>{cuadra ? 'Cuadra' : 'No cuadra'}</Badge>
+            <Badge tone={cuadra ? 'ok' : 'bad'}>{cuadra ? 'Sumas iguales: cuadra' : 'No cuadra'}</Badge>
           </div>
         </div>
       </Card>
 
+      {institucion && rows.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Ecuacion rows={patrimoniales} periodo={periodo} />
+        </div>
+      )}
+
       <div style={{ marginTop: 16 }}>
-        <CardTitled title="Cuentas de balance y resultados">
+        <CardTitled title="Balanza de comprobación: cuentas de balance y resultados">
           {state.error ? (
             <EmptyState message={`No se pudo cargar la balanza: ${state.error}`} />
+          ) : state.loading && rows.length === 0 ? (
+            <EmptyState message="Cargando la balanza…" />
           ) : (
-            <DataTable
-              columns={columns}
-              rows={patrimoniales}
-              rowKey={(r) => r.accountCode}
-              loading={state.loading}
-              emptyMessage="Ninguna cuenta tuvo movimiento con estos filtros."
-            />
+            <TablaBalanza rows={patrimoniales} totales={tP} />
           )}
         </CardTitled>
       </div>
@@ -1571,26 +1612,210 @@ function Balanza({ periodo }: { periodo: string }) {
       {orden.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <CardTitled title="Cuentas de orden">
-            <DataTable
-              columns={columns}
-              rows={orden}
-              rowKey={(r) => r.accountCode}
-              emptyMessage="Sin movimiento en cuentas de orden."
-            />
+            <TablaBalanza rows={orden} totales={tO} />
             <div className="bo-card-pad bo-sub">
-              Registran las líneas de crédito autorizadas. Cuadran entre sí y no forman parte del
-              balance: son el compromiso de la institución, no capital colocado.
+              Registran compromisos y memorias fuera del balance: las líneas autorizadas, la cartera castigada y el
+              interés de etapa 3 no reconocido. Cuadran entre sí y no forman parte del activo ni del pasivo.
             </div>
           </CardTitled>
         </div>
       )}
 
+      {producto && (
+        <div style={{ marginTop: 16 }}>
+          <EsquemaDelProducto productType={producto} periodo={periodo} />
+        </div>
+      )}
+
       <p className="bo-sub" style={{ marginTop: 8 }}>
-        Es la balanza <b>del período</b>, no el acumulado del ejercicio: los cargos y abonos son los
-        movimientos de {periodoLabel(periodo)} y no arrastran saldo inicial. Filtrar por sucursal
-        acota el movimiento a los préstamos sellados con esa unidad de origen.
+        Cada saldo va en la columna de su naturaleza: deudor (lo que la cuenta tiene o se le debe) o acreedor (lo que
+        debe o lo que generó). La balanza cuadra cuando la suma de los saldos deudores es igual a la de los acreedores,
+        y los cargos del mes a sus abonos. Los cargos y abonos son los movimientos de {periodoLabel(periodo)}; el saldo
+        inicial es lo que cada cuenta traía de los meses anteriores. Filtrar por sucursal muestra sólo los movimientos
+        de los préstamos sellados con esa unidad: una sucursal no es una entidad con balance propio, así que sus saldos
+        no tienen por qué cuadrar. Filtrar por producto muestra todo lo que el producto movió: sus préstamos o lotes de
+        comisiones y el lado del banco de cada uno, así que su balanza cuadra por sí misma. «Institución» reúne lo que no
+        es de ningún producto: el fondeo, el capital y su costo. Los productos y la institución suman la balanza.
+        {diciembre && ' La balanza de cierre del ejercicio (periodo 13) muestra la póliza que lleva ingresos y gastos a cero contra «Resultado de ejercicios anteriores» (3201): enero empieza de cero y el capital contable muestra el resultado del año.'}
       </p>
     </>
+  );
+}
+
+/**
+ * A product's accounting scheme as the ledger booked it, from January to the month: each concept (one business fact)
+ * with the pair of accounts it moves. It is what the product did, read from its entries, not a template.
+ */
+function EsquemaDelProducto({ productType, periodo }: { productType: string; periodo: string }) {
+  const desde = `${periodo.slice(0, 4)}01`;
+  const state = useAsync(() => accountingApi.productScheme(productType, desde, periodo), [productType, periodo]);
+  const conceptos = state.data?.concepts ?? [];
+  const nombre = state.data?.productName ?? productType;
+  return (
+    <CardTitled title={`Esquema contable · ${nombre}`}>
+      {state.error ? (
+        <EmptyState message={`No se pudo cargar el esquema: ${state.error}`} />
+      ) : state.loading && conceptos.length === 0 ? (
+        <EmptyState message="Cargando el esquema…" />
+      ) : conceptos.length === 0 ? (
+        <EmptyState message={`Sin asientos de ${periodoLabel(desde)} a ${periodoLabel(periodo)}.`} />
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table className="bo-table" aria-label={`Esquema contable de ${nombre}`}>
+            <thead>
+              <tr>
+                <th>Concepto</th>
+                <th>Cargo</th>
+                <th>Abono</th>
+                <th style={{ textAlign: 'right' }}>Asientos</th>
+                <th style={{ textAlign: 'right' }}>Importe</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conceptos.flatMap((c) => c.pairs.map((par, k) => (
+                <tr key={`${c.triggerEvent}|${par.debitAccount}|${par.creditAccount}`}>
+                  <td>
+                    {k === 0 && (
+                      <>
+                        <b>{c.concept ?? hechoLabel(c.triggerEvent)}</b>
+                        <div className="bo-sub">{hechoLabel(c.triggerEvent)} · {plural(c.vouchers, 'póliza', 'pólizas')}</div>
+                      </>
+                    )}
+                  </td>
+                  <td><b className="bo-mono-sm">{par.debitAccount}</b> {par.debitName}</td>
+                  <td><b className="bo-mono-sm">{par.creditAccount}</b> {par.creditName}</td>
+                  <td style={{ textAlign: 'right' }}>{count(par.entries)}</td>
+                  <td style={{ textAlign: 'right' }}>{money(par.amount, true)}</td>
+                </tr>
+              )))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="bo-card-pad bo-sub">
+        Lo que el mayor asentó para {productType === INSTITUCION ? 'la institución' : 'el producto'} de {periodoLabel(desde)} a{' '}
+        {periodoLabel(periodo)}: cada concepto con el par de cuentas que mueve, sus asientos y su importe.
+      </div>
+    </CardTitled>
+  );
+}
+
+/** Debit and credit sides of a balance; a balance within half a centavo is zero (no «−$0.00»). */
+function lados(balance: number): { deudor: number; acreedor: number } {
+  if (Math.abs(balance) < 0.005) return { deudor: 0, acreedor: 0 };
+  return balance > 0 ? { deudor: balance, acreedor: 0 } : { deudor: 0, acreedor: -balance };
+}
+
+interface Totales {
+  inicialDeudor: number; inicialAcreedor: number; cargos: number; abonos: number;
+  finalDeudor: number; finalAcreedor: number; cuadra: boolean;
+}
+
+function sumas(rs: TrialBalanceRow[]): Totales {
+  const t = { inicialDeudor: 0, inicialAcreedor: 0, cargos: 0, abonos: 0, finalDeudor: 0, finalAcreedor: 0 };
+  for (const r of rs) {
+    const i = lados(r.openingBalance ?? 0);
+    const f = lados(r.closingBalance ?? r.balance);
+    t.inicialDeudor += i.deudor; t.inicialAcreedor += i.acreedor;
+    t.cargos += r.totalDebit; t.abonos += r.totalCredit;
+    t.finalDeudor += f.deudor; t.finalAcreedor += f.acreedor;
+  }
+  const iguales = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  return { ...t, cuadra: iguales(t.inicialDeudor, t.inicialAcreedor) && iguales(t.cargos, t.abonos)
+    && iguales(t.finalDeudor, t.finalAcreedor) };
+}
+
+/** A trial balance in the usual form: opening and closing balances on their side, the month's movements, and sums. */
+function TablaBalanza({ rows, totales }: { rows: TrialBalanceRow[]; totales: Totales }) {
+  const num = (v: number) => (v === 0 ? <span className="bo-sub">—</span> : money(v, true));
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="bo-table">
+        <thead>
+          <tr>
+            <th rowSpan={2}>Cuenta</th>
+            <th colSpan={2} style={{ textAlign: 'center' }}>Saldo inicial</th>
+            <th colSpan={2} style={{ textAlign: 'center' }}>Movimientos del mes</th>
+            <th colSpan={2} style={{ textAlign: 'center' }}>Saldo final</th>
+          </tr>
+          <tr>
+            {['Deudor', 'Acreedor', 'Cargos', 'Abonos', 'Deudor', 'Acreedor'].map((h, i) => (
+              <th key={i} style={{ textAlign: 'right' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const i = lados(r.openingBalance ?? 0);
+            const f = lados(r.closingBalance ?? r.balance);
+            return (
+              <tr key={r.accountCode}>
+                <td>
+                  <b className="bo-mono-sm">{r.accountCode}</b> {r.accountName}
+                  <div className="bo-sub">{NATURALEZA[r.accountType]}</div>
+                </td>
+                <td style={{ textAlign: 'right' }}>{num(i.deudor)}</td>
+                <td style={{ textAlign: 'right' }}>{num(i.acreedor)}</td>
+                <td style={{ textAlign: 'right' }}>{num(r.totalDebit)}</td>
+                <td style={{ textAlign: 'right' }}>{num(r.totalCredit)}</td>
+                <td style={{ textAlign: 'right' }}><b>{num(f.deudor)}</b></td>
+                <td style={{ textAlign: 'right' }}><b>{num(f.acreedor)}</b></td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="bo-balanza-sumas">
+            <td>
+              <b>Sumas iguales</b>
+              <div className="bo-sub" style={{ color: totales.cuadra ? 'var(--bo-ok)' : 'var(--bo-bad)' }}>
+                {totales.cuadra ? '✓ deudor = acreedor · cargos = abonos' : '✗ las sumas no son iguales'}
+              </div>
+            </td>
+            {[totales.inicialDeudor, totales.inicialAcreedor, totales.cargos, totales.abonos,
+              totales.finalDeudor, totales.finalAcreedor].map((v, k) => (
+              <td key={k} style={{ textAlign: 'right' }}><b>{money(v, true)}</b></td>
+            ))}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+/** Assets = liabilities + equity + the year's result, from the closing balances of the institution. */
+function Ecuacion({ rows, periodo }: { rows: TrialBalanceRow[]; periodo: string }) {
+  const saldo = (pred: (r: TrialBalanceRow) => boolean) =>
+    rows.filter(pred).reduce((s, r) => s + (r.closingBalance ?? r.balance), 0);
+  const activo = saldo((r) => r.accountType === 'ASSET' || r.accountType === 'CONTRA_ASSET');
+  const pasivo = -saldo((r) => r.accountType === 'LIABILITY');
+  const capital = -saldo((r) => r.accountType === 'EQUITY');
+  const ingresos = -saldo((r) => r.accountType === 'INCOME');
+  const gastos = saldo((r) => r.accountType === 'EXPENSE');
+  const resultado = ingresos - gastos;
+  const lado = pasivo + capital + resultado;
+  const cuadra = Math.abs(activo - lado) < 0.01;
+  return (
+    <CardTitled title={`Ecuación contable al cierre de ${periodoLabel(periodo)}`}>
+      <div className="bo-card-pad" style={{ display: 'grid', gap: 12 }}>
+        <div className="bo-totales-grid" style={{ maxWidth: 680 }}>
+          <div className="bo-totales-fila"><span><b>Activo</b><span className="bo-sub"> · neto de la estimación preventiva</span></span><b>{money(activo, true)}</b></div>
+          <div className="bo-totales-fila"><span>Pasivo</span><b>{money(pasivo, true)}</b></div>
+          <div className="bo-totales-fila"><span>Capital</span><b>{money(capital, true)}</b></div>
+          <div className="bo-totales-fila">
+            <span>Resultado del ejercicio<span className="bo-sub"> · ingresos {money(ingresos, true)} − gastos {money(gastos, true)}</span></span>
+            <b style={{ color: resultado < 0 ? 'var(--bo-bad)' : undefined }}>{money(resultado, true)}</b>
+          </div>
+          <div className="bo-totales-fila bo-totales-suma"><span><b>Pasivo + capital + resultado</b></span><b>{money(lado, true)}</b></div>
+          <div className="bo-totales-fila">
+            <span style={{ color: cuadra ? 'var(--bo-ok)' : 'var(--bo-bad)' }}>
+              {cuadra ? '✓ Activo = pasivo + capital + resultado' : '✗ La ecuación no cuadra'}
+            </span>
+            {!cuadra && <b style={{ color: 'var(--bo-bad)' }}>{money(activo - lado, true)}</b>}
+          </div>
+        </div>
+      </div>
+    </CardTitled>
   );
 }
 

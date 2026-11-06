@@ -14,6 +14,10 @@ import {
   type Client, type Distributor, type OriginatedCredit,
 } from '@bo/shared-types';
 
+import { StatementsSection } from './Statements';
+import { ReceiptsSection } from './Receipts';
+import { CreditProfileSection } from './CreditProfile';
+
 ensureThemeStyles();
 
 /**
@@ -213,6 +217,12 @@ function ClientModal({ id, onClose, onChanged }: { id: string; onClose: () => vo
             />
           </section>
 
+          <StatementsSection partyId={id} />
+
+          {/* A distributor's client: his type, the red list, and the receipts of his loans with each distributor. */}
+          <CreditProfileSection partyId={id} />
+          <ReceiptsSection partyId={id} emptyHint="Sin recibos: se generan cuando una distribuidora le coloca un préstamo" />
+
           <section>
             <div className="bo-field-label" style={{ marginBottom: 10 }}>Solicitudes ({data.applications.length})</div>
             <DataTable
@@ -323,6 +333,20 @@ function DistributorModal({ id, onClose }: { id: string; onClose: () => void }) 
               </div>
             )}
           </section>
+
+          {/* The distributor's own statements: its line's (one per fortnightly cutoff, with the
+              placements it billed) and, if it has one, its own-use credit's. Its clients' statements
+              are in each client's file. */}
+          <StatementsSection
+            partyId={id}
+            emptyHint="Este distribuidor aún no tiene estados de cuenta: se generan en cada corte de su línea"
+          />
+
+          {/* Her clients' payment receipts: one per client and statement of her line, without her discount. */}
+          <ReceiptsSection
+            partyId={id}
+            emptyHint="Aún no hay recibos de sus clientes: se generan en cada corte de su línea"
+          />
 
           <section>
             <div className="bo-field-label" style={{ marginBottom: 10 }}>Créditos originados ({data.credits.length})</div>

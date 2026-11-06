@@ -626,6 +626,7 @@ body { margin: 0; background: var(--bo-bg); }
 .bo-totales-fila { display: flex; justify-content: space-between; gap: 20px; font-size: 13px; align-items: baseline; }
 .bo-totales-fila b { font-variant-numeric: tabular-nums; font-family: var(--bo-mono); }
 .bo-totales-suma { border-top: 1px solid var(--bo-border); padding-top: 6px; margin-top: 2px; font-size: 14px; }
+.bo-balanza-sumas td { border-top: 2px solid var(--bo-border-strong); font-variant-numeric: tabular-nums; }
 
 /* ---- Seccion plegable ----
    El encabezado es un boton de ancho completo para que toda la fila sea el area de clic: un

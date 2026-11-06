@@ -13,3 +13,5 @@ export * from './lib/staff.js';
 export * from './lib/beneficiaries.js';
 export * from './lib/compliance.js';
 export * from './lib/notifications.js';
+export * from './lib/statements.js';
+export * from './lib/receipts.js';

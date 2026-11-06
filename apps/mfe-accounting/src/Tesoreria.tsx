@@ -13,6 +13,7 @@ import {
   estadoDispersion, periodoLabel,
 } from './lenguaje';
 import { DispersionModal } from './DispersionModal';
+import { Fondeo } from './Fondeo';
 
 /** Cuántas dispersiones se leen para las cifras de arriba. Ver `resumen` sobre por qué no es todo. */
 const MUESTRA = 200;
@@ -212,7 +213,7 @@ export function Tesoreria({ periodo }: { periodo?: string }) {
     <div>
       <PageHeader
         title="Bancos y tesorería"
-        subtitle="Por dónde sale el dinero: las cuentas propias y la cuenta del mayor que las refleja, las rutas de pago y cada SPEI con su clave de rastreo, de la disposición a la póliza."
+        subtitle="De dónde viene el dinero y por dónde sale: el fondeo (capital y líneas), las cuentas propias y la cuenta del mayor que las refleja, las rutas de pago y cada SPEI con su clave de rastreo, de la disposición a la póliza."
       />
 
       <Stats>
@@ -258,6 +259,10 @@ export function Tesoreria({ periodo }: { periodo?: string }) {
           )}
         </Block>
       </CardTitled>
+
+      <div style={{ marginTop: 16 }}>
+        <Fondeo cuentas={cuentas.data ?? []} />
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <CardTitled

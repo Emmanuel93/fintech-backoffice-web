@@ -1,3 +1,4 @@
+import type { PlacementLimitsByType, PlacementPolicy } from '@bo/shared-types';
 import { isMock } from './config.js';
 import { request } from './http.js';
 
@@ -269,6 +270,37 @@ export const salesOrgApi = {
       method: 'PUT',
       query: rate == null ? {} : { rate },
     });
+  },
+
+  /**
+   * La política de colocación de una unidad (sólo la línea de distribuidora): lo que declara y lo que le aplica por
+   * herencia. Se declara en la sucursal (o más arriba) y la hereda su subárbol; una distribuidora sólo puede ser más
+   * estricta. Los créditos directos no la leen: su monto lo define el score.
+   */
+  async placementPolicy(code: string): Promise<PlacementPolicy> {
+    if (isMock()) {
+      return { unitId: `u-${code}`, code, levelCode: 'BRANCH', productType: 'DISTRIBUTOR_LINE', configured: false,
+        inheritedFrom: null, declared: null, effective: null };
+    }
+    return request<PlacementPolicy>(`/sales-org/units/by-code/${code}/placement-policy`);
+  },
+
+  /** Declara la política propia de la unidad; la valida sales-org contra la línea de distribuidora del catálogo. */
+  async setPlacementPolicy(code: string, body: PlacementLimitsByType): Promise<PlacementPolicy> {
+    if (isMock()) {
+      return { unitId: `u-${code}`, code, levelCode: 'BRANCH', productType: 'DISTRIBUTOR_LINE', configured: true,
+        inheritedFrom: code, declared: body, effective: body };
+    }
+    return request<PlacementPolicy>(`/sales-org/units/by-code/${code}/placement-policy`, { method: 'PUT', body });
+  },
+
+  /** La unidad deja de declarar y vuelve a heredar la de su rama superior. */
+  async clearPlacementPolicy(code: string): Promise<PlacementPolicy> {
+    if (isMock()) {
+      return { unitId: `u-${code}`, code, levelCode: 'BRANCH', productType: 'DISTRIBUTOR_LINE', configured: false,
+        inheritedFrom: null, declared: null, effective: null };
+    }
+    return request<PlacementPolicy>(`/sales-org/units/by-code/${code}/placement-policy`, { method: 'DELETE' });
   },
 
   /**

@@ -17,32 +17,43 @@ import { useState, type ReactNode } from 'react';
  * controla desde fuera: quien pide los datos tiene que saber por cuál está esperando.
  */
 export function Collapsible({
-  title, count, subtitle, children, defaultOpen = false,
+  title, count, subtitle, children, defaultOpen = false, actions, ariaLabel,
 }: {
   title: string;
   /** Cuántos elementos hay dentro. Se muestra plegado y desplegado. */
   count?: number;
-  /** Una línea de contexto que se lee sin abrir. */
-  subtitle?: string;
+  /** Una línea de contexto que se lee sin abrir: texto, o cifras ya formateadas. */
+  subtitle?: ReactNode;
   children: ReactNode;
   defaultOpen?: boolean;
+  /**
+   * What can be done without opening (e.g. «Descargar último»). It sits beside the header, not inside its button:
+   * a button inside a button is invalid HTML and its click would also fold the section.
+   */
+  actions?: ReactNode;
+  /** Accessible name of the region; the title when not given. */
+  ariaLabel?: string;
 }) {
   const [abierto, setAbierto] = useState(defaultOpen);
 
   return (
-    <div className="bo-collapsible">
-      <button
-        type="button"
-        className="bo-collapsible-head"
-        onClick={() => setAbierto(!abierto)}
-        aria-expanded={abierto}
-      >
-        <span className="bo-collapsible-chevron" data-abierto={abierto || undefined}>›</span>
-        <b>{title}</b>
-        {count != null && <span className="bo-collapsible-count">{count}</span>}
-        {subtitle && <span className="bo-sub">{subtitle}</span>}
-      </button>
+    <section className="bo-collapsible" aria-label={ariaLabel ?? title}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          className="bo-collapsible-head"
+          onClick={() => setAbierto(!abierto)}
+          aria-expanded={abierto}
+          style={actions ? { flex: 1, minWidth: 0 } : undefined}
+        >
+          <span className="bo-collapsible-chevron" data-abierto={abierto || undefined}>›</span>
+          <b>{title}</b>
+          {count != null && <span className="bo-collapsible-count">{count}</span>}
+          {subtitle && <span className="bo-sub">{subtitle}</span>}
+        </button>
+        {actions && <div style={{ display: 'inline-flex', gap: 6, flexShrink: 0 }}>{actions}</div>}
+      </div>
       {abierto && <div className="bo-collapsible-body">{children}</div>}
-    </div>
+    </section>
   );
 }

@@ -130,6 +130,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/contabilidad/polizas', label: 'Pólizas', alias: 'mfe-accounting', vista: 'polizas', capability: 'accounting.view' },
       { to: '/contabilidad/facturas', label: 'Facturas', alias: 'mfe-accounting', vista: 'facturas', capability: 'accounting.view' },
       { to: '/contabilidad/balanza', label: 'Balanza', alias: 'mfe-accounting', vista: 'balanza', capability: 'accounting.view' },
+      // Each service checks its own data with the close's contract; here the four reports are read together.
+      { to: '/contabilidad/autoverificacion', label: 'Autoverificación', alias: 'mfe-accounting', vista: 'autoverificacion', capability: 'accounting.view' },
       // Va en Contabilidad porque se concilia contra ella —la póliza de egreso contra el SPEI que
       // de verdad salió—, pero con su propia capacidad: operación contesta «¿ya le llegó?» con la
       // clave de rastreo, y para eso no necesita leer el mayor.

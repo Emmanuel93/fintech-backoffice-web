@@ -98,7 +98,7 @@ const MOCK_MATRIX: PermissionMatrix = {
     'beneficiaries.review-identity', 'beneficiaries.view', 'clients.assign-executive',
     'clients.view', 'compliance.adjudicate', 'compliance.review-identity', 'compliance.view',
     'dashboard.commercial', 'dashboard.view', 'permissions.manage', 'permissions.view',
-    'portfolio.view', 'products.manage', 'salesorg.manage', 'salesorg.view', 'treasury.view',
+    'portfolio.view', 'products.manage', 'salesorg.manage', 'salesorg.view', 'treasury.funding', 'treasury.view',
   ],
   // Operación ve tesorería sin ver el mayor: la pregunta que le llega es «¿ya le llegó su
   // dinero?», y se contesta con la clave de rastreo, no con la balanza.
@@ -136,7 +136,7 @@ const MOCK_MATRIX: PermissionMatrix = {
   ],
   FINANCE: [
     'accounting.close', 'accounting.view', 'dashboard.commercial', 'dashboard.view',
-    'portfolio.view', 'salesorg.view', 'treasury.view',
+    'portfolio.view', 'salesorg.view', 'treasury.funding', 'treasury.view',
   ],
   PRODUCT_MANAGER: ['dashboard.view', 'products.manage'],
   SUPPORT: [

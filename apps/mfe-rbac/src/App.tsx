@@ -631,6 +631,7 @@ function capLabel(c: string): string {
     'beneficiaries.view': 'Ver colocaciones a beneficiarios',
     'beneficiaries.review-identity': 'Dictaminar identidad de beneficiarias',
     'treasury.view': 'Ver bancos y tesorería',
+    'treasury.funding': 'Registrar el fondeo (capital y líneas)',
   };
   return map[c] ?? c;
 }
